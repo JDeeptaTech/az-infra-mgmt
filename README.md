@@ -123,4 +123,42 @@ base64data=$(cat base64.txt)
       when: not crt_file_check.stat.exists and venafi_certificate_retrieval.failed
       debug:
         msg: "Failed to retrieve certificate '{{ venafi_friendly_name }}' from Venafi. Error: {{ venafi_certificate_retrieval.msg }}"
+
+ - name: Ensure we are in the right directory
+      ansible.builtin.shell: cd {{ cert_dir }}
+      args:
+        chdir: "{{ cert_dir }}"
+
+    - name: Create PKCS#12 keystore with signed cert and key
+      ansible.builtin.command: >
+        openssl pkcs12 -export
+        -in {{ crt_file }}
+        -inkey {{ key_file }}
+        -name {{ keystore_alias }}
+        -out {{ keystore_output }}
+        -passout pass:{{ keystore_password }}
+      args:
+        chdir: "{{ cert_dir }}"
+
+    - name: Import Root CA to truststore
+      ansible.builtin.command: >
+        keytool -import -noprompt
+        -alias RootCA
+        -file "{{ root_ca_file }}"
+        -keystore "{{ truststore_output }}"
+        -storetype PKCS12
+        -storepass "{{ truststore_password }}"
+      args:
+        chdir: "{{ cert_dir }}"
+
+    - name: Import Intermediate CA to truststore
+      ansible.builtin.command: >
+        keytool -import -noprompt
+        -alias IntermediateCA
+        -file "{{ intermediate_ca_file }}"
+        -keystore "{{ truststore_output }}"
+        -storetype PKCS12
+        -storepass "{{ truststore_password }}"
+      args:
+        chdir: "{{ cert_dir }}"
 ```
