@@ -1,52 +1,42 @@
-Task List
-1. Project Initialization
- Create project directory and initialize Git repo
+---
 
- Set up Python virtual environment
+## 🚀 Features
 
- Install required Python packages (fastapi, uvicorn, etc.)
+- FastAPI backend
+- Generated API client from OpenAPI spec
+- Dockerized application
+- GitHub Actions pipeline for Docker builds
 
-2. Use OpenAPI Specification
- Clone/download OpenAPI spec from GitHub
+---
 
- Install openapi-python-client
+## 🛠️ Setup Instructions
 
- Generate API client from OpenAPI spec
+### 1. Project Initialization
 
- Integrate generated client into FastAPI project
+ Task Checklist
+ Initialize FastAPI project
 
-3. Create FastAPI App
- Create main FastAPI application file (main.py)
+ Download/Open OpenAPI spec
 
- Add basic routes and integrate API client
+ Generate client using openapi-python-client
 
- Add exception handling, middleware, and dependencies as needed
+ Implement FastAPI endpoints
 
-4. Requirements Management
- Freeze and save dependencies to requirements.txt
+ Freeze dependencies into requirements.txt
 
-5. Docker Setup
- Write a Dockerfile for building the FastAPI app image
+ Create Dockerfile and .dockerignore
 
- Create .dockerignore to exclude unnecessary files
+ Build and run Docker image locally
 
-6. Build and Run Docker Image
- Build Docker image locally
+ Set up GitHub Actions workflow
 
- Run container and test API locally
+ Push to DockerHub on each main branch update
 
-7. CI/CD Pipeline Setup
- Set up GitHub Actions (or other CI) workflow
+Optional Enhancements
+Add health check endpoints
 
- Configure DockerHub credentials in repository secrets
+Add logging and settings management
 
- Add GitHub Actions workflow to build and push Docker image on push
+Add unit tests and CI test stage
 
-8. Optional Enhancements
- Add health check endpoint
-
- Add API versioning
-
- Add logging and configuration support
-
- Write unit tests and add test stage to CI pipeline
+Deploy with Kubernetes or Docker Compose
