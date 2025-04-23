@@ -1,80 +1,115 @@
+**Terraform Development Task List (vCenter + Vault)**
+
+**1. Project Initialization**
+
+* Create
+  project repository and directory structure
+* Initialize
+  Git and .gitignore for Terraform (*.tfstate, .terraform/, etc.)
+* Write
+  a README.md for project overview and usage
+
 ---
 
-## 🚀 Features
+**2. Terraform Configuration Setup**
 
-- FastAPI backend
-- Generated API client from OpenAPI spec
-- Dockerized application
-- GitHub Actions pipeline for Docker builds
+* Install
+  Terraform CLI
+* Set
+  up Terraform provider blocks:
+  * vsphere
+    provider for vCenter
+  * vault
+    provider for HashiCorp Vault
+* Create
+  a versions.tf file to pin provider versions and Terraform version
 
 ---
 
-## 🛠️ Setup Instructions
+**3. Vault Integration**
 
-### 1. Project Initialization
+* Configure
+  Vault provider
+* Authenticate
+  to Vault (token, AppRole, etc.)
+* Read
+  secrets from Vault (e.g., vSphere credentials)
+* Use vault_generic_secret
+  or vault_generic_endpoint as needed
 
- Task Checklist
- Initialize FastAPI project
+---
 
- Download/Open OpenAPI spec
+**4. vCenter Integration**
 
- Generate client using openapi-python-client
+* Create
+  a base main.tf to manage vCenter infrastructure:
+  * Datacenter
+  * Cluster
+  * Resource
+    pool
+  * VM
+    templates or VM provisioning
+* Configure
+  network, datastore, and folder resources
+* Use
+  Vault secrets to inject vCenter credentials securely
 
- Implement FastAPI endpoints
+---
 
- Freeze dependencies into requirements.txt
+**5. Environment & Variable Management**
 
- Create Dockerfile and .dockerignore
+* Create
+  variables.tf for input variables
+* Create
+  terraform.tfvars or environment-specific *.tfvars files
+* Create
+  outputs.tf to expose important outputs
 
- Build and run Docker image locally
+---
 
- Set up GitHub Actions workflow
+**6. State Management**
 
- Push to DockerHub on each main branch update
+* Configure
+  remote backend (use postgreSQL backend)
+* Use terraform
+  workspace for environment separation if needed
 
-Optional Enhancements
-Add health check endpoints
+---
 
-Add logging and settings management
+**7. Modules (for Reusability)**
 
-Add unit tests and CI test stage
+* Create
+  reusable Terraform modules for:
+  * VM
+    creation
+  * Network
+    configuration
+  * Secrets
+    injection
 
-Deploy with Kubernetes or Docker Compose
+---
 
-'''
-# Connect to vCenter
-Connect-VIServer -Server 'your-vcenter-server'
+**8. Testing & Validation**
 
-# Get all ESXi hosts
-$hosts = Get-VMHost
+* Run terraform
+  fmt and terraform validate
+* Use terraform
+  plan to preview changes
+* Apply
+  with terraform apply (preferably in a non-prod environment)
 
-# Initialize array to store results
-$report = @()
+---
 
-foreach ($vmhost in $hosts) {
-    $hostName = $vmhost.Name
-    $hbas = Get-VMHostHba -VMHost $vmhost -Type FibreChannel
+**9. Security Best Practices**
 
-    foreach ($hba in $hbas) {
-        $paths = Get-ScsiLun -VMHost $vmhost | Get-ScsiLunPath | Where-Object { $_.Device -eq $hba.Device }
+* Use terraform-provider-vault
+  to dynamically retrieve credentials
 
-        foreach ($path in $paths) {
-            $row = [PSCustomObject]@{
-                ScsiCanonicalName = $path.ScsiLunCanonicalName
-                HostName          = $hostName
-                HBA               = $path.Name
-                ServerHBA         = $hba.NodeWorldWideName
-                FA                = $path.AdapterWorldWideName
-                Status            = if ($path.State -eq "active") { "✔" } else { "✖" }
-            }
-            $report += $row
-        }
-    }
-}
+---
 
-# Export to CSV
-$report | Export-Csv -Path ".\HBA_Precheck_Report.csv" -NoTypeInformation
+**10. CI/CD Pipeline**
 
-# Optionally display in grid view
-$report | Out-GridView -Title "HBA Precheck Report"
-'''
+* Set
+  up Jenkins pipeline
+* Lint,
+  format, versioning
