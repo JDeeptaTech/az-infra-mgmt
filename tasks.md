@@ -1,3 +1,38 @@
+```
+#!/bin/bash
+
+THRESHOLD=80  # percent
+vc_host="vcenter.example.com"
+vc_user="your-username"
+vc_pass="your-password"
+
+export GOVC_URL="$vc_host"
+export GOVC_USERNAME="$vc_user"
+export GOVC_PASSWORD="$vc_pass"
+export GOVC_INSECURE=1
+
+# You can filter datacenters and clusters here
+best_cluster=""
+best_dc=""
+
+# List all datacenters
+for dc in $(govc ls /); do
+  clusters=$(govc ls "$dc/host")
+  for cluster in $clusters; do
+    usage=$(govc metric.sample -instance "" -name "cpu.usage.average" "$cluster" -json | jq '.[0].value[0]')
+    usage_percent=${usage%.*}
+    if [[ $usage_percent -lt $THRESHOLD ]]; then
+      best_cluster=$(basename "$cluster")
+      best_dc=$(basename "$dc")
+      break 2
+    fi
+  done
+done
+
+echo "{\"datacenter\": \"$best_dc\", \"cluster\": \"$best_cluster\"}"
+
+```
+
 **Terraform Development Task List (vCenter + Vault)**
 
 **1. Project Initialization**
