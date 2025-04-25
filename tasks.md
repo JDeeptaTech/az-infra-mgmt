@@ -1,6 +1,24 @@
 ```
 #!/bin/bash
 
+cluster_path="/DatacenterName/host/ClusterName"
+
+# Get JSON output from govc
+output=$(govc object.collect -json "$cluster_path" cpu.usage.average mem.usage.average)
+
+# Extract the latest CPU usage value
+cpu_usage=$(echo "$output" | jq '[.[] | select(.Name=="cpu.usage.average") | .Value[-1]] | .[0]')
+
+# Extract the latest Memory usage value
+mem_usage=$(echo "$output" | jq '[.[] | select(.Name=="mem.usage.average") | .Value[-1]] | .[0]')
+
+echo "CPU Usage: $cpu_usage%"
+echo "Memory Usage: $mem_usage%"
+
+```
+```
+#!/bin/bash
+
 govc metric.sample /DC1/host/Prod-Cluster cpu.usage.average mem.usage.average datastore.used.* -json | jq -r '.[] | [.SampleInfo[].Timestamp, .Value[].Name, .Value[].Value] | @csv' > cluster_metrics.csv
 
 THRESHOLD=80  # percent
