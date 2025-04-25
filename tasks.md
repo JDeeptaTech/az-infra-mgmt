@@ -1,6 +1,8 @@
 ```
 #!/bin/bash
 
+govc metric.sample /DC1/host/Prod-Cluster cpu.usage.average mem.usage.average datastore.used.* -json | jq -r '.[] | [.SampleInfo[].Timestamp, .Value[].Name, .Value[].Value] | @csv' > cluster_metrics.csv
+
 THRESHOLD=80  # percent
 vc_host="vcenter.example.com"
 vc_user="your-username"
