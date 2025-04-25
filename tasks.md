@@ -1,19 +1,19 @@
 ```
-#!/bin/bash
+# Run govc object.collect with JSON output
+output=$(govc object.collect -json "$cluster" cpu.usage.average mem.usage.average 2>/dev/null)
 
-cluster_path="/DatacenterName/host/ClusterName"
+# Check if output is valid JSON
+if echo "$output" | jq . >/dev/null 2>&1; then
+  cpu_usage=$(echo "$output" | jq '[.[] | select(.Name=="cpu.usage.average") | .Value[-1]] | .[0]')
+  mem_usage=$(echo "$output" | jq '[.[] | select(.Name=="mem.usage.average") | .Value[-1]] | .[0]')
+else
+  cpu_usage="N/A"
+  mem_usage="N/A"
+fi
 
-# Get JSON output from govc
-output=$(govc object.collect -json "$cluster_path" cpu.usage.average mem.usage.average)
+echo "CPU Usage: $cpu_usage"
+echo "Memory Usage: $mem_usage"
 
-# Extract the latest CPU usage value
-cpu_usage=$(echo "$output" | jq '[.[] | select(.Name=="cpu.usage.average") | .Value[-1]] | .[0]')
-
-# Extract the latest Memory usage value
-mem_usage=$(echo "$output" | jq '[.[] | select(.Name=="mem.usage.average") | .Value[-1]] | .[0]')
-
-echo "CPU Usage: $cpu_usage%"
-echo "Memory Usage: $mem_usage%"
 
 ```
 ```
