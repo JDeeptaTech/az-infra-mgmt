@@ -1,18 +1,24 @@
 ```
-# Run govc object.collect with JSON output
-output=$(govc object.collect -json "$cluster" cpu.usage.average mem.usage.average 2>/dev/null)
+for dc in $(govc ls /); do
+  echo "Datacenter: $dc"
 
-# Check if output is valid JSON
-if echo "$output" | jq . >/dev/null 2>&1; then
-  cpu_usage=$(echo "$output" | jq '[.[] | select(.Name=="cpu.usage.average") | .Value[-1]] | .[0]')
-  mem_usage=$(echo "$output" | jq '[.[] | select(.Name=="mem.usage.average") | .Value[-1]] | .[0]')
-else
-  cpu_usage="N/A"
-  mem_usage="N/A"
-fi
+  for cluster in $(govc find "$dc/host" -type c); do
+    echo "  Cluster: $cluster"
 
-echo "CPU Usage: $cpu_usage"
-echo "Memory Usage: $mem_usage"
+    output=$(govc object.collect -json "$cluster" cpu.usage.average mem.usage.average 2>/dev/null)
+
+    if echo "$output" | jq . >/dev/null 2>&1; then
+      cpu_usage=$(echo "$output" | jq '[.[] | select(.Name=="cpu.usage.average") | .Value[-1]] | .[0]')
+      mem_usage=$(echo "$output" | jq '[.[] | select(.Name=="mem.usage.average") | .Value[-1]] | .[0]')
+    else
+      cpu_usage="N/A"
+      mem_usage="N/A"
+    fi
+
+    echo "    CPU Usage: $cpu_usage"
+    echo "    Memory Usage: $mem_usage"
+  done
+done
 
 
 ```
