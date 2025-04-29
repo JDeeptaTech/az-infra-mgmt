@@ -1,0 +1,22 @@
+{
+  "required_tags": ["production", "ssd"],
+  "scoring": {
+    "tags": {
+      "weight": 0.3,
+      "cluster_tags": ["high-availability", "performance-tier"],
+      "datastore_tags": ["flash-storage", "replicated"]
+    },
+    "resources": {
+      "weight": 0.4,
+      "cpu_usage_threshold": 80,
+      "memory_usage_threshold": 75,
+      "free_space_weight": 0.6,
+      "latency_weight": 0.4
+    },
+    "network": {
+      "weight": 0.3,
+      "preferred_zones": ["zone-a", "zone-b"],
+      "bandwidth_threshold": 1000
+    }
+  }
+}
