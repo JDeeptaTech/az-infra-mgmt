@@ -1,4 +1,29 @@
 ```python
+def calculate_usage(used, capacity):
+    return (used / capacity) * 100
+
+# Values from the screenshot
+cpu_used = 32.94  # GHz
+cpu_capacity = 293.76  # GHz
+
+memory_used = 701.16  # GB
+memory_capacity = 1462.72  # GB
+
+storage_used = 28307.34  # GB
+storage_capacity = 42231.5  # GB
+
+# Calculating usage
+cpu_usage_pct = calculate_usage(cpu_used, cpu_capacity)
+memory_usage_pct = calculate_usage(memory_used, memory_capacity)
+storage_usage_pct = calculate_usage(storage_used, storage_capacity)
+
+print(f"CPU Usage: {cpu_usage_pct:.2f}%")
+print(f"Memory Usage: {memory_usage_pct:.2f}%")
+print(f"Storage Usage: {storage_usage_pct:.2f}%")
+
+```
+
+```python
 import json
 import requests
 from typing import Dict, List
