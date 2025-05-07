@@ -1,3 +1,100 @@
+```python
+import requests
+import json
+from requests.auth import HTTPBasicAuth
+
+# Configuration
+VROPS_HOST = 'your-vrops-server.example.com'
+USERNAME = 'your_username'
+PASSWORD = 'your_password'
+API_VERSION = '8.6'  # Adjust based on your vROps version
+
+# API endpoints
+AUTH_URL = f'https://{VROPS_HOST}/suite-api/api/auth/token/acquire'
+RECOMMENDATIONS_URL = f'https://{VROPS_HOST}/suite-api/api/recommendations'
+
+def get_auth_token():
+    """Authenticate and get the auth token"""
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+    auth_payload = {
+        'username': USERNAME,
+        'password': PASSWORD
+    }
+    
+    try:
+        response = requests.post(
+            AUTH_URL,
+            headers=headers,
+            data=json.dumps(auth_payload),
+            verify=False  # Set to True with valid certificate
+        )
+        response.raise_for_status()
+        return response.json().get('token')
+    except requests.exceptions.RequestException as e:
+        print(f"Authentication failed: {e}")
+        return None
+
+def get_vm_recommendations(auth_token, resource_id=None):
+    """Get VM recommendations"""
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': f'vRealizeOpsToken {auth_token}'
+    }
+    
+    params = {
+        'resourceId': resource_id,
+        'recommendationState': 'ACTIVE',  # Can be ACTIVE, DISMISSED, IMPLEMENTED
+        'recommendationType': 'RECONFIGURE',  # Can be RECONFIGURE, REPURPOSE, REPLACE, etc.
+        'pageSize': 100  # Number of recommendations to fetch
+    }
+    
+    try:
+        response = requests.get(
+            RECOMMENDATIONS_URL,
+            headers=headers,
+            params=params,
+            verify=False  # Set to True with valid certificate
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to get recommendations: {e}")
+        return None
+
+def main():
+    # Step 1: Authenticate
+    auth_token = get_auth_token()
+    if not auth_token:
+        print("Unable to authenticate. Exiting.")
+        return
+    
+    print("Authentication successful")
+    
+    # Step 2: Get VM recommendations
+    # If you know a specific VM resource ID, pass it as resource_id parameter
+    recommendations = get_vm_recommendations(auth_token)
+    
+    if recommendations:
+        print(f"Found {recommendations.get('total', 0)} recommendations:")
+        for rec in recommendations.get('recommendationList', []):
+            print(f"\nRecommendation ID: {rec.get('id')}")
+            print(f"Resource: {rec.get('resourceName')} ({rec.get('resourceId')})")
+            print(f"Type: {rec.get('recommendationType')}")
+            print(f"State: {rec.get('recommendationState')}")
+            print(f"Description: {rec.get('description')}")
+            print(f"Details: {rec.get('details')}")
+            print("---")
+    else:
+        print("No recommendations found or error occurred")
+
+if __name__ == '__main__':
+    main()
+```
+
 ```
 for dc in $(govc ls /); do
   echo "Datacenter: $dc"
