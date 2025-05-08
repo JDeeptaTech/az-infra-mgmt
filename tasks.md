@@ -1,4 +1,157 @@
+
+
+
 ```python
+
+from pyVim import connect
+from pyVmomi import vim
+
+def get_host_hba_luns(si, host):
+    """
+    Retrieves Fiber Channel and iSCSI HBAs and their associated LUN details for a host.
+
+    Args:
+        si (ServiceInstance): vSphere Service Instance.
+        host (vim.HostSystem): ESXi host object.
+
+    Returns:
+        dict: A dictionary containing HBA information.
+              Keys are HBA device names, and values are lists of LUN details.
+    """
+    hba_lun_info = {"fc": {}, "iscsi": {}}
+    storage_system = host.configManager.storageSystem
+    if storage_system and storage_system.storageDeviceInfo and storage_system.storageDeviceInfo.hostBusAdapter:
+        for hba in storage_system.storageDeviceInfo.hostBusAdapter:
+            hba_type = None
+            hba_name = hba.device
+            lun_details = []
+
+            if isinstance(hba, vim.HostFibreChannelHba):
+                hba_type = "fc"
+            elif isinstance(hba, vim.HostInternetScsiHba):
+                hba_type = "iscsi"
+
+            if hba_type:
+                for path in storage_system.storageDeviceInfo.multipathInfo.path:
+                    if path.adapter == hba.key:
+                        for lun in storage_system.storageDeviceInfo.multipathInfo.lun:
+                            if lun.key == path.lun:
+                                lun_info = {
+                                    "canonical_name": lun.canonicalName,
+                                    "uuid": lun.uuid,
+                                    "lun_type": lun.lunType,
+                                    "state": lun.state,
+                                    "operational_state": lun.operationalState,
+                                    # Add other relevant LUN properties
+                                }
+                                lun_details.append(lun_info)
+                hba_lun_info[hba_type][hba_name] = lun_details
+    return hba_lun_info
+
+def get_vm_host(si, vm_name):
+    """
+    Retrieves the ESXi host that a given VM is running on.
+
+    Args:
+        si (ServiceInstance): vSphere Service Instance.
+        vm_name (str): Name of the virtual machine.
+
+    Returns:
+        vim.HostSystem or None: The ESXi host object if found, otherwise None.
+    """
+    content = si.RetrieveContent()
+    vm = None
+    container = content.rootFolder.childEntity
+    for child in container:
+        if hasattr(child, 'vmFolder'):
+            vm_folder = child.vmFolder
+            vm_list = vm_folder.childEntity
+            for v in vm_list:
+                if v.name == vm_name:
+                    vm = v
+                    break
+            if vm:
+                break
+        elif isinstance(child, vim.VirtualMachine) and child.name == vm_name:
+            vm = child
+            break
+    if vm and vm.runtime and vm.runtime.host:
+        return vm.runtime.host
+    return None
+
+def main(vcenter_host, vcenter_user, vcenter_password, vm_name):
+    """
+    Connects to vCenter, retrieves the host for a VM, and then gets FC/iSCSI HBA and LUN details.
+
+    Args:
+        vcenter_host (str): vCenter hostname or IP address.
+        vcenter_user (str): vCenter username.
+        vcenter_password (str): vCenter password.
+        vm_name (str): Name of the virtual machine.
+    """
+    si = None
+    try:
+        si = connect.SmartConnectNoSSL(
+            host=vcenter_host,
+            user=vcenter_user,
+            pwd=vcenter_password,
+            port=443
+        )
+
+        host = get_vm_host(si, vm_name)
+
+        if host:
+            print(f"Host for VM '{vm_name}': {host.name}")
+            hba_lun_info = get_host_hba_luns(si, host)
+
+            print("\nFiber Channel HBAs and LUNs:")
+            if hba_lun_info["fc"]:
+                for hba_name, luns in hba_lun_info["fc"].items():
+                    print(f"  HBA: {hba_name}")
+                    for lun in luns:
+                        print(f"    - Canonical Name: {lun['canonical_name']}")
+                        print(f"      UUID: {lun['uuid']}")
+                        print(f"      LUN Type: {lun['lun_type']}")
+                        print(f"      State: {lun['state']}")
+                        print(f"      Operational State: {lun['operational_state']}")
+                        # Print other LUN details as needed
+            else:
+                print("  No Fiber Channel HBAs found.")
+
+            print("\niSCSI HBAs and LUNs:")
+            if hba_lun_info["iscsi"]:
+                for hba_name, luns in hba_lun_info["iscsi"].items():
+                    print(f"  HBA: {hba_name}")
+                    for lun in luns:
+                        print(f"    - Canonical Name: {lun['canonical_name']}")
+                        print(f"      UUID: {lun['uuid']}")
+                        print(f"      LUN Type: {lun['lun_type']}")
+                        print(f"      State: {lun['state']}")
+                        print(f"      Operational State: {lun['operational_state']}")
+                        # Print other LUN details as needed
+            else:
+                print("  No iSCSI HBAs found.")
+
+        else:
+            print(f"Could not find the host for VM '{vm_name}'.")
+
+    except vim.fault.InvalidLogin as e:
+        print(f"Login error: {e.msg}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        if si:
+            connect.Disconnect(si)
+
+if __name__ == "__main__":
+    vcenter_host = "your_vcenter_ip"  # Replace with your vCenter IP
+    vcenter_user = "your_username"  # Replace with your vCenter username
+    vcenter_password = "your_password"  # Replace with your vCenter password
+    vm_name = "your_vm_name"  # Replace with the name of your VM
+
+    main(vcenter_host, vcenter_user, vcenter_password, vm_name)
+
+___
 import requests
 import json
 from requests.auth import HTTPBasicAuth
