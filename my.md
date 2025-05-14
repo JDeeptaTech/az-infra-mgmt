@@ -1,29 +1,4 @@
-```
-Subject: Request for Dedicated Focus Time to Improve Task Completion
 
-Hi Anveshika,
-
-I wanted to provide a quick update on the pending storage-related tasks and share some context around the delays.
-
-At present, I’m juggling multiple parallel tasks and switching contexts frequently throughout the day. While I’ve been trying to keep everything moving, this “20% capacity” multitasking model is leading to fragmentation of focus and slower progress overall—resulting in delay rather than delivery.
-
-Here’s a summary of the current workload and associated estimates:
-
-Area	Task Description	Status / Notes
-Infoarchive	SSL Renewal (Hybrid: Windows & Linux), post-checks, Jenkins testing	In Progress – High effort, needs ~5 focused days
-Enterprise Vault	SSL Renewal & SLA Patch	Low effort – ~1 focused day
-eSXI	Post-checks, test runs, evidence email	Low effort – ~1 focused day
-NBU	On Hold	
-Production Deployment	Multiple package prep, OCUM Ansible deployment	Needs 3–4 days (including prep + prod)
-Infoarchive	SAFI API Development	2 focused days needed
-
-I believe I can manage these tasks more effectively with dedicated focus blocks, rather than context switching. A more streamlined approach would significantly improve both quality and turnaround time.
-
-Thanks for your understanding and support.
-
-Best regards,
-Pradeep
-```
 
 ```python
 from typing import Callable, Optional
