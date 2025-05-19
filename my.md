@@ -1,4 +1,7 @@
 ```python
+
+sudo ln -s /Applications/Docker.app/Contents/Resources/bin/docker /usr/local/bin/docker
+
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
