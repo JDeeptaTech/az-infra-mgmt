@@ -1,3 +1,27 @@
+```sql
+CREATE TABLE vm_table (
+    id SERIAL PRIMARY KEY, -- Assuming 'id' as a primary key, as TB1 lists attributes but not an explicit PK
+    vm_name VARCHAR(255),
+    environment VARCHAR(255),
+    data_type VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    created_by VARCHAR(255),
+    updated_by VARCHAR(255),
+    lifecycle_status VARCHAR(255),
+    status_message TEXT
+);
+
+CREATE TABLE vm_audit_history (
+    uuid UUID PRIMARY KEY, -- 'uuid' as a UUID primary key for invocation ID
+    correlation_id UUID,  -- 'correlation_id' as a UUID for invocation ID
+    vm_name VARCHAR(255),
+    delta_data JSONB,     -- Using JSONB for better performance and indexing over JSON
+    created_at TIMESTAMP DEFAULT NOW(), -- "when this status was lo" (likely meant 'logged')
+    created_by VARCHAR(255)
+);
+```
+
 ```python
 
 sudo ln -s /Applications/Docker.app/Contents/Resources/bin/docker /usr/local/bin/docker
