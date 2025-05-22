@@ -1,4 +1,38 @@
 ```sql
+-- Create the 'users' table if it doesn't already exist
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    additional_info JSONB
+);
+
+-- Optional: Add comments to the table and columns for better documentation
+COMMENT ON TABLE users IS 'Stores user account information.';
+COMMENT ON COLUMN users.id IS 'Unique identifier for the user.';
+COMMENT ON COLUMN users.username IS 'Unique username for login.';
+COMMENT ON COLUMN users.email IS 'Unique email address for communication and login.';
+COMMENT ON COLUMN users.created_at IS 'Timestamp when the user record was created.';
+COMMENT ON COLUMN users.updated_at IS 'Timestamp when the user record was last updated.';
+COMMENT ON COLUMN users.additional_info IS 'Flexible JSONB column for storing additional user-specific data.';
+
+-- Function to update the 'updated_at' timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to call the function before each update on the 'users' table
+CREATE OR REPLACE TRIGGER update_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+€
 CREATE TABLE vm_table (
     id SERIAL PRIMARY KEY, -- Assuming 'id' as a primary key, as TB1 lists attributes but not an explicit PK
     vm_name VARCHAR(255),
