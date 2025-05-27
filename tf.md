@@ -1,61 +1,135 @@
-# Pull Request (PR) Validation Workflow
+``` python
+from pyVim import connect
+from pyVmomi import vim
+import ssl
+import atexit
 
-This document outlines the workflow for validating Pull Requests (PRs) to ensure code quality and adherence to standards before merging into the `main` branch. This process leverages a Jenkins PR Pipeline to automate checks, primarily focusing on Terraform configurations.
+# --- Configuration Variables ---
+VCENTER_SERVER = "your_vcenter_fqdn_or_ip"
+VCENTER_USER = "your_vcenter_username"
+VCENTER_PASSWORD = "your_vcenter_password"
+DATACENTER_NAME = "YourDatacenterName"
+CLUSTER_NAME = "YourClusterName"
+VM_NAME_TO_ADD = "YourVMName"
+EXISTING_VM_GROUP_NAME = "YourExistingVMGroupName"
 
-[**_Optional: Insert your image.png here_**]
+# --- Helper Function to Find Objects ---
+def get_obj(content, vimtype, name):
+    """
+    Retrieves a vCenter object by its type and name.
+    """
+    obj = None
+    container = content.viewManager.CreateContainerView(
+        content.rootFolder, vimtype, True
+    )
+    for c in container.view:
+        if c.name == name:
+            obj = c
+            break
+    container.Destroy()
+    return obj
 
----
+# --- Main Logic ---
+def add_vm_to_vm_host_group_pyvmomi():
+    service_instance = None
+    try:
+        # 1. Connect to vCenter
+        print(f"Connecting to vCenter: {VCENTER_SERVER}...")
+        # Disable SSL certificate verification (for labs/testing only, use proper certs in prod!)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.verify_mode = ssl.CERT_NONE
+        service_instance = connect.SmartConnectNoSSL(
+            host=VCENTER_SERVER,
+            user=VCENTER_USER,
+            pwd=VCENTER_PASSWORD,
+            port=443,
+            context=context
+        )
+        # Ensure proper logout on script exit
+        atexit.register(connect.Disconnect, service_instance)
+        content = service_instance.RetrieveContent()
+        print("Connected to vCenter.")
 
-## 1. Developer Action
+        # 2. Find Objects
+        print(f"\nFinding Datacenter '{DATACENTER_NAME}'...")
+        datacenter = get_obj(content, [vim.Datacenter], DATACENTER_NAME)
+        if not datacenter:
+            raise ValueError(f"Datacenter '{DATACENTER_NAME}' not found.")
+        print(f"Found Datacenter: {datacenter.name} (MoRef: {datacenter._moId})")
 
-The workflow begins with actions initiated by the developer:
+        print(f"\nFinding Cluster '{CLUSTER_NAME}'...")
+        cluster = get_obj(content, [vim.ClusterComputeResource], CLUSTER_NAME)
+        if not cluster:
+            raise ValueError(f"Cluster '{CLUSTER_NAME}' not found.")
+        print(f"Found Cluster: {cluster.name} (MoRef: {cluster._moId})")
 
-* **Developer Commits & Pushes Feature Branch:** The developer makes changes on a dedicated feature branch and pushes these changes to the remote repository.
-* **Opens Pull Request to `main`:** After pushing the feature branch, the developer creates a Pull Request targeting the `main` branch. This action triggers the automated Jenkins PR Pipeline.
+        print(f"\nFinding VM '{VM_NAME_TO_ADD}'...")
+        vm_to_add = get_obj(content, [vim.VirtualMachine], VM_NAME_TO_ADD)
+        if not vm_to_add:
+            raise ValueError(f"VM '{VM_NAME_TO_ADD}' not found.")
+        print(f"Found VM: {vm_to_add.name} (MoRef: {vm_to_add._moId})")
 
----
+        print(f"\nFinding existing VM Host Group '{EXISTING_VM_GROUP_NAME}' in cluster '{CLUSTER_NAME}'...")
+        existing_vm_group_found = None
+        current_vms_in_group = []
 
-## 2. Jenkins PR Pipeline (AAP)
+        if cluster.configurationEx and cluster.configurationEx.group:
+            for group in cluster.configurationEx.group:
+                if isinstance(group, vim.ClusterVmGroup) and group.name == EXISTING_VM_GROUP_NAME:
+                    existing_vm_group_found = group
+                    if group.vm:
+                        current_vms_in_group = [vm._moId for vm in group.vm]
+                    break
+        
+        if not existing_vm_group_found:
+            raise ValueError(f"VM Host Group '{EXISTING_VM_GROUP_NAME}' not found in cluster '{CLUSTER_NAME}'.")
+        
+        print(f"Found existing VM Group: {existing_vm_group_found.name}")
+        print(f"Current VMs in group (MoRef IDs): {current_vms_in_group}")
 
-Upon creation of the Pull Request, a Jenkins PR Pipeline (labeled as "AAP" in the diagram) is automatically initiated. This pipeline consists of several sequential tasks designed to validate the proposed changes:
+        # 3. Modify VM Host Group
+        # Create a new list of VM MoRef IDs including the VM to add
+        new_vm_mo_ids = list(set(current_vms_in_group + [vm_to_add._moId]))
+        print(f"New list of VM MoRef IDs for group: {new_vm_mo_ids}")
 
-* **Task: Checkout Code:**
-    * **Description:** The pipeline first checks out the code from the feature branch associated with the Pull Request into the Jenkins workspace. This ensures that all subsequent tasks operate on the latest changes.
-* **Task: Terraform Init PR:**
-    * **Description:** This task initializes the Terraform working directory. It downloads necessary provider plugins and modules, preparing the environment for subsequent Terraform operations. This is crucial for validating the Terraform configuration.
-* **Task: Validate & Format PR:**
-    * **Description:** This stage focuses on validating the syntax and format of the Terraform code within the PR. It comprises three parallel runs:
-        * **Run: `terraform fmt -check`**
-            * **Purpose:** This command checks if the Terraform configuration files are properly formatted according to the canonical Terraform style. It ensures consistency across the codebase. If files are not formatted correctly, this check will fail.
-        * **Run: `terraform validate`**
-            * **Purpose:** This command validates the configuration files in the current directory, checking for syntax errors, inconsistencies, and valid references. It ensures that the Terraform code is syntactically correct and internally consistent.
-        * **Run: `terraform plan Plain PR`**
-            * **Purpose:** This command creates an execution plan, showing what actions Terraform will take (e.g., creating, modifying, or destroying resources) if the configuration were to be applied. While it doesn't apply changes, it verifies that a valid plan can be generated, identifying potential issues before deployment.
-* **Run: `terraform plan -out=tfplan`**
-    * **Description:** Following the validation checks, a `terraform plan` is executed again, but this time its output is saved to a file named `tfplan`.
-    * **Purpose:** This `tfplan` file serves as a detailed record of the proposed infrastructure changes.
-* **Save: `tfplan.json` as Artifact:**
-    * **Description:** The `tfplan` file, which is a binary file, is typically converted to `tfplan.json` for easier inspection and saved as a build artifact in Jenkins.
-    * **Purpose:** Saving this artifact allows for manual review of the proposed changes, auditing, and can be used in subsequent deployment steps if the PR is approved.
+        # Create a ClusterConfigSpec to modify the cluster configuration
+        cluster_config_spec = vim.cluster.ConfigSpecEx()
 
----
+        # Create a VmGroupSpec to specify the changes to the VM group
+        vm_group_spec = vim.cluster.VmGroupSpec()
+        vm_group_spec.info = vim.cluster.VmGroup()
+        vm_group_spec.info.name = EXISTING_VM_GROUP_NAME
+        # The 'vm' attribute expects a list of ManagedObjectReference objects, not just their IDs
+        vm_group_spec.info.vm = [vim.ManagedObjectReference(type="VirtualMachine", value=mo_id) for mo_id in new_vm_mo_ids]
 
-## 3. Result
+        # Operation to edit the VM group
+        vm_group_spec.operation = vim.option.ArrayUpdateSpec.Operation.edit
 
-After all tasks within the Jenkins PR Pipeline complete, the workflow proceeds to evaluate the outcomes of the checks:
+        cluster_config_spec.vmGroup = [vm_group_spec]
 
-* **All Checks Pass? (Decision Point):**
-    * **Description:** This is a conditional decision point. The workflow evaluates the success of all the preceding `terraform fmt -check`, `terraform validate`, and `terraform plan` runs.
-    * **Criteria:** For the checks to pass, all three Terraform commands (formatting check, validation, and plan generation) must complete successfully without errors.
+        # 4. Reconfigure Cluster
+        print(f"\nReconfiguring cluster '{CLUSTER_NAME}' to add VM to group...")
+        task = cluster.ReconfigureComputeResource_Task(spec=cluster_config_spec, modify=True)
 
----
+        # Wait for the task to complete
+        print("Waiting for task to complete...")
+        task.wait_for_completion()
 
-## 4. Outcomes
+        if task.info.state == vim.TaskInfo.State.success:
+            print(f"Successfully added VM '{VM_NAME_TO_ADD}' to VM Host Group '{EXISTING_VM_GROUP_NAME}'.")
+        else:
+            raise RuntimeError(f"Task failed: {task.info.error.localizedMessage}")
 
-Based on the "All Checks Pass?" decision, one of two outcomes will occur:
+    except ValueError as e:
+        print(f"Configuration Error: {e}")
+    except vim.fault.InvalidLogin as e:
+        print(f"Authentication failed: {e.msg}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    finally:
+        # 5. Disconnect (handled by atexit.register for pyvmomi)
+        pass # Disconnect is registered to run automatically on script exit
 
-* **If "Yes" (All Checks Pass):**
-    * **PR Ready for Review & Merge:** The Pull Request is marked as successful. It is now considered ready for human review by other team members. Once reviewed and approved, it can be merged into the `main` branch.
-* **If "No" (Checks Fail):**
-    * **Report Failure to PR:** The workflow reports the failure back to the Pull Request in the version control system (e.g., GitHub, GitLab). This typically means setting the PR status to "failed" or "pending," and providing details in the build logs about which specific check failed.
-    * **Action Required:** The developer is then responsible for reviewing the reported errors, fixing the issues in their feature branch, and pushing new commits. This will trigger the Jenkins PR Pipeline again for re-validation.
+if __name__ == "__main__":
+    add_vm_to_vm_host_group_pyvmomi()
+```
