@@ -2,6 +2,8 @@
 
 This document outlines the workflow for validating Pull Requests (PRs) to ensure code quality and adherence to standards before merging into the `main` branch. This process leverages a Jenkins PR Pipeline to automate checks, primarily focusing on Terraform configurations.
 
+[**_Optional: Insert your image.png here_**]
+
 ---
 
 ## 1. Developer Action
