@@ -3,6 +3,8 @@ from pyVim import connect
 from pyVmomi import vim
 import ssl
 import atexit
+import os
+import certifi # For standard CA bundle, if not using system trust store
 
 # --- Configuration Variables ---
 VCENTER_SERVER = "your_vcenter_fqdn_or_ip"
@@ -13,58 +15,91 @@ CLUSTER_NAME = "YourClusterName"
 VM_NAME_TO_ADD = "YourVMName"
 EXISTING_VM_GROUP_NAME = "YourExistingVMGroupName"
 
-# --- Helper Function to Find Objects ---
-def get_obj(content, vimtype, name):
+# --- SSL Certificate Handling Option ---
+# Set to True to verify SSL certificates (recommended for production).
+# Set to False to disable SSL verification (for labs/testing only).
+VERIFY_SSL = True
+# Path to a custom CA bundle file (e.g., your vCenter's self-signed cert).
+# If VERIFY_SSL is True and this is None, 'certifi.where()' or system trust store is used.
+CA_BUNDLE_PATH = None # e.g., "/path/to/your/vcenter_ca.pem"
+
+# --- Helper Function to Find Objects using PropertyCollector ---
+def get_obj_by_name(content, vimtype, name):
     """
-    Retrieves a vCenter object by its type and name.
+    Retrieves a vCenter object by its type and name using PropertyCollector.
+    This is generally more efficient for large inventories.
     """
-    obj = None
-    container = content.viewManager.CreateContainerView(
+    view_ref = content.viewManager.CreateContainerView(
         content.rootFolder, vimtype, True
     )
-    for c in container.view:
-        if c.name == name:
-            obj = c
+    # Define the properties to retrieve (only 'name' is needed for filtering)
+    property_spec = vim.PropertySpec(type=vimtype[0], pathSet=['name'])
+    object_spec = vim.ObjectSpec(obj=view_ref)
+    property_filter_spec = vim.PropertyFilterSpec(
+        objectSet=[object_spec],
+        propSet=[property_spec]
+    )
+
+    # Retrieve properties
+    objects = content.propertyCollector.RetrieveContents([property_filter_spec])
+
+    obj = None
+    for o in objects:
+        for prop in o.propSet:
+            if prop.name == 'name' and prop.val == name:
+                obj = o.obj
+                break
+        if obj:
             break
-    container.Destroy()
+    
+    view_ref.Destroy()
     return obj
 
 # --- Main Logic ---
-def add_vm_to_vm_host_group_pyvmomi():
+def add_vm_to_vm_host_group_pyvmomi_updated():
     service_instance = None
     try:
         # 1. Connect to vCenter
         print(f"Connecting to vCenter: {VCENTER_SERVER}...")
-        # Disable SSL certificate verification (for labs/testing only, use proper certs in prod!)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.verify_mode = ssl.CERT_NONE
-        service_instance = connect.SmartConnectNoSSL(
+        
+        context = None
+        if VERIFY_SSL:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations(CA_BUNDLE_PATH if CA_BUNDLE_PATH else certifi.where())
+            context.verify_mode = ssl.CERT_REQUIRED
+            print("SSL verification enabled.")
+        else:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.verify_mode = ssl.CERT_NONE
+            print("SSL verification disabled (WARNING: insecure for production).")
+
+        service_instance = connect.SmartConnect(
             host=VCENTER_SERVER,
             user=VCENTER_USER,
             pwd=VCENTER_PASSWORD,
             port=443,
-            context=context
+            sslContext=context
         )
         # Ensure proper logout on script exit
         atexit.register(connect.Disconnect, service_instance)
         content = service_instance.RetrieveContent()
         print("Connected to vCenter.")
 
-        # 2. Find Objects
+        # 2. Find Objects using the updated helper
         print(f"\nFinding Datacenter '{DATACENTER_NAME}'...")
-        datacenter = get_obj(content, [vim.Datacenter], DATACENTER_NAME)
+        datacenter = get_obj_by_name(content, [vim.Datacenter], DATACENTER_NAME)
         if not datacenter:
             raise ValueError(f"Datacenter '{DATACENTER_NAME}' not found.")
         print(f"Found Datacenter: {datacenter.name} (MoRef: {datacenter._moId})")
 
         print(f"\nFinding Cluster '{CLUSTER_NAME}'...")
-        cluster = get_obj(content, [vim.ClusterComputeResource], CLUSTER_NAME)
+        cluster = get_obj_by_name(content, [vim.ClusterComputeResource], CLUSTER_NAME)
         if not cluster:
             raise ValueError(f"Cluster '{CLUSTER_NAME}' not found.")
         print(f"Found Cluster: {cluster.name} (MoRef: {cluster._moId})")
 
         print(f"\nFinding VM '{VM_NAME_TO_ADD}'...")
-        vm_to_add = get_obj(content, [vim.VirtualMachine], VM_NAME_TO_ADD)
+        vm_to_add = get_obj_by_name(content, [vim.VirtualMachine], VM_NAME_TO_ADD)
         if not vm_to_add:
             raise ValueError(f"VM '{VM_NAME_TO_ADD}' not found.")
         print(f"Found VM: {vm_to_add.name} (MoRef: {vm_to_add._moId})")
@@ -89,6 +124,7 @@ def add_vm_to_vm_host_group_pyvmomi():
 
         # 3. Modify VM Host Group
         # Create a new list of VM MoRef IDs including the VM to add
+        # Use set for deduplication and convert to list
         new_vm_mo_ids = list(set(current_vms_in_group + [vm_to_add._moId]))
         print(f"New list of VM MoRef IDs for group: {new_vm_mo_ids}")
 
@@ -124,12 +160,14 @@ def add_vm_to_vm_host_group_pyvmomi():
         print(f"Configuration Error: {e}")
     except vim.fault.InvalidLogin as e:
         print(f"Authentication failed: {e.msg}")
+    except ssl.SSLError as e:
+        print(f"SSL Error: {e}. Please check your CA_BUNDLE_PATH or vCenter certificate.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
-        # 5. Disconnect (handled by atexit.register for pyvmomi)
-        pass # Disconnect is registered to run automatically on script exit
+        # Disconnect is handled by atexit.register for pyvmomi
+        pass
 
 if __name__ == "__main__":
-    add_vm_to_vm_host_group_pyvmomi()
+    add_vm_to_vm_host_group_pyvmomi_updated()
 ```
