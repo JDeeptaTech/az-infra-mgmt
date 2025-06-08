@@ -1,4 +1,4 @@
-'''
+'''yml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -54,7 +54,7 @@ spec:
       #   emptyDir:
       #     medium: Memory
 
-
+'''
 from fastapi import FastAPI, HTTPException
 import os
 
