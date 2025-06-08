@@ -1,10 +1,12 @@
-'''yml
+```yml
+# k8s-manifests.yaml
+
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: my-app-sa
-  namespace: default # Ensure this matches the namespace used in the Vault role
-
+  namespace: default # Must match the namespace used in the Vault role
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,76 +28,130 @@ spec:
         vault.hashicorp.com/agent-inject: "true"
         # Specify the Vault role to use for authentication
         vault.hashicorp.com/role: "my-app-role"
-        # Inject the 'db_url' secret from 'secret/my-app/config' into an env var named DB_URL
-        vault.hashicorp.com/agent-inject-env-db_url: "secret/data/my-app/config#db_url"
-        # Inject the 'api_key' secret from 'secret/my-app/config' into an env var named API_KEY
-        vault.hashicorp.com/agent-inject-env-api_key: "secret/data/my-app/config#api_key"
-        # (Optional) Template the secrets into a file instead of env vars
-        # vault.hashicorp.com/agent-inject-template-config: |
-        #   {{- with secret "secret/data/my-app/config" -}}
-        #   DB_URL="{{ .Data.data.db_url }}"
-        #   API_KEY="{{ .Data.data.api_key }}"
-        #   {{- end }}
+        # Inject 'db_connection_string' from Vault secret/data/my-app/config into env var DB_CONNECTION_STRING
+        vault.hashicorp.com/agent-inject-env-DB_CONNECTION_STRING: "secret/data/my-app/config#db_connection_string"
+        # Inject 'api_key' from Vault secret/data/my-app/config into env var API_KEY
+        vault.hashicorp.com/agent-inject-env-API_KEY: "secret/data/my-app/config#api_key"
+        # Inject 'application_name' from Vault secret/data/my-app/config into env var APPLICATION_NAME
+        vault.hashicorp.com/agent-inject-env-APPLICATION_NAME: "secret/data/my-app/config#application_name"
+        # (Optional) Tell Vault Agent to log at a higher level for debugging
+        # vault.hashicorp.com/agent-inject-log-level: "debug"
     spec:
       serviceAccountName: my-app-sa # Link to the ServiceAccount created above
       containers:
       - name: fastapi-app
-        image: your-docker-registry/fastapi-vault-app:latest # Replace with your image
+        image: fastapi-vault-app:latest # IMPORTANT: Replace with your actual image name if pushing to a registry
         ports:
         - containerPort: 8000
-        # If you were templating to a file, you would mount a volume here
-        # volumeMounts:
-        # - name: vault-secrets
-        #   mountPath: /vault/secrets
-        # readOnly: true
-      # If you were templating to a file, you would define the volume here
-      # volumes:
-      # - name: vault-secrets
-      #   emptyDir:
-      #     medium: Memory
+        env:
+          # Define placeholders or default values.
+          # The injected secrets will override these if successful.
+          - name: DB_CONNECTION_STRING
+            value: "NOT_SET_BY_VAULT"
+          - name: API_KEY
+            value: "NOT_SET_BY_VAULT"
+          - name: APPLICATION_NAME
+            value: "NOT_SET_BY_VAULT"
 
-'''
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-vault-app-service
+  labels:
+    app: fastapi-vault-app
+spec:
+  selector:
+    app: fastapi-vault-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: LoadBalancer # Or ClusterIP, NodePort depending on your needs for external access
+```
+
+``` python
+# main.py
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 import os
+import uvicorn
 
 app = FastAPI()
 
 # Retrieve secrets from environment variables
 # These environment variables will be injected by the Vault Agent sidecar
-DB_URL = os.getenv("DB_URL")
+DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING")
 API_KEY = os.getenv("API_KEY")
+APP_NAME = os.getenv("APPLICATION_NAME") # To show another secret
 
-# Basic validation (optional, but good practice)
-if not DB_URL or not API_KEY:
-    # In a real application, you might want to log this critical error
-    # and potentially exit or use a default value if appropriate.
-    print("WARNING: DB_URL or API_KEY environment variables not set. "
-          "This might indicate an issue with Vault secret injection.")
-
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def read_root():
-    return {"message": "Hello from FastAPI!", "status": "running"}
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>FastAPI Vault Secret Test</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 2em; }
+            pre { background-color: #eee; padding: 1em; border-radius: 5px; }
+            .success { color: green; font-weight: bold; }
+            .warning { color: orange; font-weight: bold; }
+            .error { color: red; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <h1>FastAPI Application for Vault Secret Testing</h1>
+        <p>This application attempts to read secrets injected as environment variables from HashiCorp Vault.</p>
+        <p>Go to the <a href="/secrets">/secrets</a> endpoint to see the status of secret retrieval.</p>
+        <p>Application Name: <strong>{}</strong></p>
+    </body>
+    </html>
+    """.format(APP_NAME if APP_NAME else "Not Loaded")
+    return HTMLResponse(content=html_content)
 
-@app.get("/secret-info")
-async def get_secret_info():
-    if not DB_URL or not API_KEY:
-        raise HTTPException(status_code=500, detail="Secrets not loaded.")
-
-    # In a real application, you would use these secrets
-    # to connect to a database, call an external API, etc.
-    return {
-        "db_url_status": "loaded" if DB_URL else "not loaded",
-        "api_key_status": "loaded" if API_KEY else "not loaded",
-        "example_usage": "These secrets would be used for database connections or API calls."
-        # IMPORTANT: Do NOT return actual secret values in a real API endpoint!
+@app.get("/secrets")
+async def get_secret_status():
+    secrets_status = {
+        "DB_CONNECTION_STRING": "Loaded" if DB_CONNECTION_STRING else "Not Loaded",
+        "API_KEY": "Loaded" if API_KEY else "Not Loaded",
+        "APPLICATION_NAME": "Loaded" if APP_NAME else "Not Loaded",
+        "raw_env_vars_snippet": ""
     }
 
-# Example of how you might use the DB_URL (not actually connecting here)
-@app.get("/connect-db-example")
-async def connect_db_example():
-    if not DB_URL:
-        raise HTTPException(status_code=500, detail="Database URL not available.")
-    # Simulate database connection (replace with actual database logic)
-    print(f"Attempting to connect to database using URL: {DB_URL[:10]}...") # Print only prefix for security
-    return {"message": "Simulated database connection attempt successful."}
-'''
+    # IMPORTANT: In a real application, NEVER return actual secret values!
+    # This is for testing/debugging purposes only.
+    if DB_CONNECTION_STRING:
+        secrets_status["db_connection_string_value_snippet"] = f"{DB_CONNECTION_STRING[:10]}..." # Show only a snippet
+    if API_KEY:
+        secrets_status["api_key_value_snippet"] = f"{API_KEY[:5]}..." # Show only a snippet
+    if APP_NAME:
+        secrets_status["application_name_value"] = APP_NAME
+
+
+    # To demonstrate that env vars are indeed set
+    # Filter for injected vars only for a clean output
+    injected_vars = {
+        k: v for k, v in os.environ.items()
+        if k in ["DB_CONNECTION_STRING", "API_KEY", "APPLICATION_NAME"]
+    }
+    secrets_status["raw_env_vars_snippet"] = injected_vars
+
+    # Determine overall status
+    if DB_CONNECTION_STRING and API_KEY and APP_NAME:
+        secrets_status["overall_status"] = "All secrets loaded successfully!"
+        secrets_status["status_color"] = "success"
+    else:
+        secrets_status["overall_status"] = "Some secrets are missing or not loaded."
+        secrets_status["status_color"] = "error" if not (DB_CONNECTION_STRING and API_KEY and APP_NAME) else "warning"
+
+    return secrets_status
+
+# Optional: To run locally for quick testing before Docker/K8s
+if __name__ == "__main__":
+    # For local testing, you can set env vars directly to simulate injection:
+    # os.environ["DB_CONNECTION_STRING"] = "local_db_conn"
+    # os.environ["API_KEY"] = "local_api_key"
+    # os.environ["APPLICATION_NAME"] = "LocalTestApp"
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+````
