@@ -1,3 +1,36 @@
+``` python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, explode
+from pyspark.sql.types import StructType, StructField, StringType, TimestampType
+
+# Define the schema
+schema = StructType([
+    StructField("description", StringType(), True),
+    StructField("lastModifiedDateTime", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("closedDateTime", StringType(), True),
+    StructField("externalId", StringType(), True),
+    StructField("id", StringType(), True),
+    StructField("displayName", StringType(), True),
+    StructField("createdDateTime", StringType(), True),
+    StructField("lastModifiedBy", StructType([
+        StructField("application", StringType(), True),
+        StructField("user", StructType([
+            StructField("id", StringType(), True),
+            StructField("displayName", StringType(), True)
+        ]))
+    ])),
+    StructField("closedBy", StructType([
+        StructField("application", StringType(), True),
+        StructField("user", StructType([
+            StructField("id", StringType(), True),
+            StructField("displayName", StringType(), True)
+        ]))
+    ]))
+])
+
+```
+
 ```powershell
 # --- Custom Logging Function (reused and slightly modified) ---
 function Write-Log {
