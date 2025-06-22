@@ -1,3 +1,50 @@
+``` powershell
+# Define the path to your CSV files
+$SourceFolderPath = "C:\Your\Path\To\CSVFiles" # <--- IMPORTANT: Change this to the folder containing your CSV files
+
+# Define the path and name for the consolidated output file
+$OutputFilePath = "C:\Your\Path\To\Output\ConsolidatedData.csv" # <--- IMPORTANT: Change this to your desired output file path and name
+
+# Define the name for the new column that will store the filename
+$NewColumnName = "SourceFileName"
+
+# Create an empty array to store all consolidated data
+$AllData = @()
+
+# Get all CSV files in the source folder
+$csvFiles = Get-ChildItem -Path $SourceFolderPath -Filter "*.csv"
+
+if ($csvFiles.Count -eq 0) {
+    Write-Warning "No CSV files found in '$SourceFolderPath'. Please check the path."
+} else {
+    Write-Host "Found $($csvFiles.Count) CSV files in '$SourceFolderPath'."
+
+    foreach ($file in $csvFiles) {
+        Write-Host "Processing file: $($file.Name)"
+
+        # Import the CSV content
+        $data = Import-Csv -Path $file.FullName
+
+        # Get the file name without the extension
+        $fileName = $file.BaseName
+
+        # Add the new column with the file name to each row
+        foreach ($row in $data) {
+            $row | Add-Member -MemberType NoteProperty -Name $NewColumnName -Value $fileName -Force
+        }
+
+        # Add the modified data to the consolidated array
+        $AllData += $data
+    }
+
+    # Export all consolidated data to a new CSV file
+    Write-Host "Exporting consolidated data to '$OutputFilePath'."
+    $AllData | Export-Csv -Path $OutputFilePath -NoTypeInformation
+
+    Write-Host "Script completed successfully! Consolidated data saved to '$OutputFilePath'."
+}
+```
+
 ``` bash
 #!/bin/bash
 
