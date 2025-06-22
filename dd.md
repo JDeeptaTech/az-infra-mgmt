@@ -1,12 +1,19 @@
 ``` powershell
 # Define the path to your CSV files
 $SourceFolderPath = "C:\Your\Path\To\CSVFiles" # <--- IMPORTANT: Change this to the folder containing your CSV files
+# Define the path to your CSV files
+$SourceFolderPath = "C:\Your\Path\To\CSVFiles" # <--- IMPORTANT: Change this to the folder containing your CSV files
 
-# Define the path and name for the consolidated output file
-$OutputFilePath = "C:\Your\Path\To\Output\ConsolidatedData.csv" # <--- IMPORTANT: Change this to your desired output file path and name
+# Define the base name for the consolidated output file (without date/time or extension)
+$OutputFileNameBase = "ConsolidatedData"
 
 # Define the name for the new column that will store the filename
 $NewColumnName = "SourceFileName"
+
+# --- NEW: Generate a timestamp for the filename ---
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+# Construct the full output file path with the timestamp
+$OutputFilePath = Join-Path -Path "C:\Your\Path\To\Output" -ChildPath "$($OutputFileNameBase)_$($timestamp).csv" # <--- IMPORTANT: Change the base output directory "C:\Your\Path\To\Output"
 
 # Create an empty array to store all consolidated data
 $AllData = @()
