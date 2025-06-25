@@ -1,3 +1,128 @@
+```py
+import os
+import hvac
+import pandas as pd
+import json # Used for pretty printing secrets if desired for debugging
+
+# --- Configuration ---
+# It's highly recommended to use environment variables for sensitive information
+# For development/testing, you might set these directly, but avoid in production.
+VAULT_ADDR = os.environ.get('VAULT_ADDR', 'http://127.0.0.1:8200')
+VAULT_TOKEN = os.environ.get('VAULT_TOKEN', 'your_vault_root_token_here') # Replace with your actual token or ensure VAULT_TOKEN env var is set
+KV_SECRET_ENGINE_MOUNT_POINT = os.environ.get('VAULT_KV_MOUNT_POINT', 'secret') # Default KV secret engine mount point
+OUTPUT_EXCEL_FILE = 'vault_secrets_export.xlsx'
+
+# --- Functions to interact with Vault ---
+
+def get_hvac_client():
+    """
+    Initializes and returns an HVAC client connected to HashiCorp Vault.
+    Authenticates using a token.
+    """
+    try:
+        client = hvac.Client(url=VAULT_ADDR, token=VAULT_TOKEN)
+        if not client.is_authenticated():
+            raise Exception("Failed to authenticate with Vault. Check VAULT_ADDR and VAULT_TOKEN.")
+        print(f"Successfully connected and authenticated to Vault at {VAULT_ADDR}")
+        return client
+    except Exception as e:
+        print(f"Error connecting to Vault: {e}")
+        exit(1)
+
+def list_secret_paths_recursive(client, path, mount_point):
+    """
+    Recursively lists all secret paths within a given Vault path for KV v2 secrets engine.
+    """
+    secrets_list = []
+    current_path = path
+
+    try:
+        # List items at the current path
+        list_response = client.secrets.kv.v2.list_secrets(
+            mount_point=mount_point,
+            path=current_path,
+            raise_on_not_found=False # Don't raise error if path doesn't exist
+        )
+
+        if list_response and 'data' in list_response and 'keys' in list_response['data']:
+            for key in list_response['data']['keys']:
+                full_key_path = os.path.join(current_path, key)
+                if key.endswith('/'): # It's a directory
+                    secrets_list.extend(list_secret_paths_recursive(client, full_key_path, mount_point))
+                else: # It's a secret
+                    secrets_list.append(full_key_path)
+        return secrets_list
+    except hvac.exceptions.VaultError as e:
+        print(f"Warning: Could not list secrets at path '{current_path}' (mount: '{mount_point}'). Error: {e}")
+        return []
+    except Exception as e:
+        print(f"An unexpected error occurred while listing secrets at path '{current_path}': {e}")
+        return []
+
+
+def get_secret_data(client, path, mount_point):
+    """
+    Retrieves the data for a specific secret path using KV v2 secrets engine.
+    """
+    try:
+        read_response = client.secrets.kv.v2.read_secret_version(
+            mount_point=mount_point,
+            path=path
+        )
+        if read_response and 'data' in read_response and 'data' in read_response['data']:
+            return read_response['data']['data']
+        return None
+    except hvac.exceptions.VaultError as e:
+        print(f"Warning: Could not read secret at path '{path}' (mount: '{mount_point}'). Error: {e}")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred while reading secret at path '{path}': {e}")
+        return None
+
+# --- Main Logic ---
+
+if __name__ == "__main__":
+    client = get_hvac_client()
+
+    print(f"\nScanning Vault for secrets under mount point '{KV_SECRET_ENGINE_MOUNT_POINT}'...")
+    all_secret_paths = list_secret_paths_recursive(client, '', KV_SECRET_ENGINE_MOUNT_POINT)
+
+    print(f"Found {len(all_secret_paths)} secret paths.")
+
+    all_secrets_data = []
+    for path in all_secret_paths:
+        print(f"Retrieving secret: {KV_SECRET_ENGINE_MOUNT_POINT}/{path}")
+        secret_data = get_secret_data(client, path, KV_SECRET_ENGINE_MOUNT_POINT)
+        if secret_data:
+            # Flatten the secret data for Excel.
+            # Each secret will be a row, with 'Path' as the first column,
+            # and then each key from the secret data as a subsequent column.
+            flattened_data = {'Path': f"{KV_SECRET_ENGINE_MOUNT_POINT}/{path}"}
+            for key, value in secret_data.items():
+                flattened_data[key] = value
+            all_secrets_data.append(flattened_data)
+
+    if not all_secrets_data:
+        print("No secret data retrieved. Exiting.")
+        exit(0)
+
+    print("\nPreparing data for Excel export...")
+    # Create a Pandas DataFrame
+    # Using from_records to handle varying keys across secrets
+    df = pd.DataFrame.from_records(all_secrets_data)
+
+    # Reorder columns to have 'Path' first
+    cols = ['Path'] + [col for col in df.columns if col != 'Path']
+    df = df[cols]
+
+    print(f"Exporting secrets to '{OUTPUT_EXCEL_FILE}'...")
+    try:
+        df.to_excel(OUTPUT_EXCEL_FILE, index=False)
+        print(f"Successfully exported {len(all_secrets_data)} secrets to '{OUTPUT_EXCEL_FILE}'")
+    except Exception as e:
+        print(f"Error exporting to Excel: {e}")
+```
+
 ```sql
 -- Create the 'users' table if it doesn't already exist
 CREATE TABLE IF NOT EXISTS users (
