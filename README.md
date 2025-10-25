@@ -1,164 +1,131 @@
 # az-infra-mgmt
 
-``` bash
-base64data=$(cat base64.txt)
-{
-  echo "-----BEGIN CERTIFICATE-----"
-  echo "$base64data"
-  echo "-----END CERTIFICATE-----"
-} > mycert.crt
-```
-``` yaml
----
-- name: Backup existing certificate-related files
-  hosts: localhost
-  vars:
-    cert_dir: "/path/to/your/cert/folder"  # <-- update this
-    backup_dir: "{{ cert_dir }}/backup_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
-    extensions:
-      - "*.crt"
-      - "*.pem"
-      - "*.p12"
+``` py
+import streamlit as st
+import psycopg2
+import pandas as pd
+from datetime import datetime, time
 
-  tasks:
-    - name: Create backup directory
-      file:
-        path: "{{ backup_dir }}"
-        state: directory
-        mode: '0755'
+# -----------------------------
+# ⚙️ PostgreSQL Connection Config
+# -----------------------------
+DB_CONFIG = {
+    "host": "localhost",
+    "port": "5432",
+    "database": "mydb",
+    "user": "postgres",
+    "password": "password"
+}
 
-    - name: Find files to back up
-      find:
-        paths: "{{ cert_dir }}"
-        patterns: "{{ extensions }}"
-        recurse: no
-      register: cert_files
+# -----------------------------
+# 🔌 Connect to Database
+# -----------------------------
+@st.cache_resource
+def get_connection():
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        return conn
+    except Exception as e:
+        st.error(f"❌ Database connection failed: {e}")
+        return None
 
-    - name: Copy files to backup directory
-      copy:
-        src: "{{ item.path }}"
-        dest: "{{ backup_dir }}/"
-        mode: preserve
-      loop: "{{ cert_files.files }}"
----
----
-- name: Retrieve Venafi Certificate in Base64 and Convert to .crt
-  hosts: your_target_hosts  # Replace with your target host group or hostname
-  vars:
-    venafi_url: "your_venafi_url"  # Replace with your Venafi platform URL
-    venafi_zone: "your\\venafi\\application\\zone"  # Replace with your Venafi certificate zone
-    venafi_friendly_name: "your_certificate_friendly_name"  # Replace with the certificate's friendly name in Venafi
-    venafi_api_key: "your_venafi_api_key"  # Replace with your Venafi API key (securely manage this)
-    local_destination_path: "/path/to/your/destination/folder"  # Replace with the desired local folder
-    crt_filename: "{{ venafi_friendly_name }}.crt"
-    crt_fullpath: "{{ local_destination_path }}/{{ crt_filename }}"
+# -----------------------------
+# 🔍 Query Function
+# -----------------------------
+def query_data(search, start_dt, end_dt, limit, offset):
+    query = """
+        SELECT id, release_name, description, created_at
+        FROM releases
+        WHERE (release_name ILIKE %s OR description ILIKE %s)
+          AND created_at BETWEEN %s AND %s
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
+    """
+    params = (f"%{search}%", f"%{search}%", start_dt, end_dt, limit, offset)
 
-  tasks:
-    - name: Check if the CRT certificate file already exists
-      stat:
-        path: "{{ crt_fullpath }}"
-      register: crt_file_check
+    conn = get_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
+        return pd.DataFrame(rows, columns=columns)
+    return pd.DataFrame()
 
-    - name: Retrieve certificate from Venafi in Base64 format
-      when: not crt_file_check.stat.exists
-      uri:
-        url: "{{ venafi_url }}/vedsdk/Certificates/Retrieve"
-        method: POST
-        headers:
-          Content-Type: "application/json"
-          Authorization: "Bearer {{ venafi_api_key }}"
-        body_format: json
-        body: >-
-          {
-            "Zone": "{{ venafi_zone }}",
-            "FriendlyName": "{{ venafi_friendly_name }}",
-            "Format": "Base64"
-          }
-        return_content: yes
-        status_code: [200]
-      register: venafi_certificate_retrieval
-      no_log: yes  # Sensitive information, avoid logging
+# -----------------------------
+# 🔢 Count Function (for pagination)
+# -----------------------------
+def count_rows(search, start_dt, end_dt):
+    query = """
+        SELECT COUNT(*)
+        FROM releases
+        WHERE (release_name ILIKE %s OR description ILIKE %s)
+          AND created_at BETWEEN %s AND %s
+    """
+    params = (f"%{search}%", f"%{search}%", start_dt, end_dt)
+    conn = get_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            total = cur.fetchone()[0]
+        return total
+    return 0
 
-    - name: Create destination directory if it doesn't exist
-      when: not crt_file_check.stat.exists
-      file:
-        path: "{{ local_destination_path }}"
-        state: directory
-        mode: '0755'
+# -----------------------------
+# 🎨 Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="📦 Release Dashboard", layout="wide")
+st.title("📦 Release Dashboard")
 
-    - name: Save the Base64 encoded certificate to a temporary .cer file
-      when: not crt_file_check.stat.exists and venafi_certificate_retrieval.content is defined
-      copy:
-        content: "{{ venafi_certificate_retrieval.content }}"
-        dest: "{{ local_destination_path }}/{{ venafi_friendly_name }}.cer"
-        mode: '0644'
-      no_log: yes # Contains certificate data
+# Sidebar filters
+with st.sidebar:
+    st.header("🔍 Filters")
 
-    - name: Convert the .cer file to .crt format
-      when: not crt_file_check.stat.exists and venafi_certificate_retrieval.content is defined
-      shell: |
-        openssl x509 -inform der -in "{{ local_destination_path }}/{{ venafi_friendly_name }}.cer" -outform pem -out "{{ crt_fullpath }}"
-      args:
-        creates: "{{ crt_fullpath }}"
-      become: yes # May require elevated privileges depending on the destination path
+    search = st.text_input("Search text", "")
+    
+    st.markdown("### 📅 Date Range")
+    start_date = st.date_input("Start date", datetime(2024, 1, 1))
+    start_time = st.time_input("Start time", time(0, 0))
+    end_date = st.date_input("End date", datetime.now().date())
+    end_time = st.time_input("End time", time(23, 59))
 
-    - name: Remove the temporary .cer file
-      when: not crt_file_check.stat.exists and venafi_certificate_retrieval.content is defined
-      file:
-        path: "{{ local_destination_path }}/{{ venafi_friendly_name }}.cer"
-        state: absent
-      become: yes # May require elevated privileges
+    # Combine date and time into datetime objects
+    start_dt = datetime.combine(start_date, start_time)
+    end_dt = datetime.combine(end_date, end_time)
 
-    - name: Inform user that the CRT certificate already exists
-      when: crt_file_check.stat.exists
-      debug:
-        msg: "Certificate '{{ crt_filename }}' already exists at '{{ crt_fullpath }}'."
+    rows_per_page = st.slider("Rows per page", 5, 50, 10)
+    page = st.number_input("Page number", min_value=1, step=1)
 
-    - name: Inform user about successful certificate retrieval and conversion
-      when: not crt_file_check.stat.exists and venafi_certificate_retrieval.content is defined
-      debug:
-        msg: "Successfully retrieved certificate from Venafi and saved as '{{ crt_filename }}' at '{{ crt_fullpath }}'."
+# -----------------------------
+# 📊 Query & Display Data
+# -----------------------------
+offset = (page - 1) * rows_per_page
+df = query_data(search, start_dt, end_dt, rows_per_page, offset)
+total = count_rows(search, start_dt, end_dt)
+total_pages = (total // rows_per_page) + (1 if total % rows_per_page else 0)
 
-    - name: Inform user about failed certificate retrieval
-      when: not crt_file_check.stat.exists and venafi_certificate_retrieval.failed
-      debug:
-        msg: "Failed to retrieve certificate '{{ venafi_friendly_name }}' from Venafi. Error: {{ venafi_certificate_retrieval.msg }}"
+if not df.empty:
+    st.success(f"✅ Showing page {page} of {total_pages} — {total} total records")
+    st.dataframe(df, use_container_width=True)
+else:
+    st.warning("No results found for the given filters.")
 
- - name: Ensure we are in the right directory
-      ansible.builtin.shell: cd {{ cert_dir }}
-      args:
-        chdir: "{{ cert_dir }}"
+# -----------------------------
+# 🧭 Pagination info
+# -----------------------------
+st.sidebar.info(f"Total records: {total}\nTotal pages: {total_pages}")
 
-    - name: Create PKCS#12 keystore with signed cert and key
-      ansible.builtin.command: >
-        openssl pkcs12 -export
-        -in {{ crt_file }}
-        -inkey {{ key_file }}
-        -name {{ keystore_alias }}
-        -out {{ keystore_output }}
-        -passout pass:{{ keystore_password }}
-      args:
-        chdir: "{{ cert_dir }}"
+# -----------------------------
+# 💾 Optional: Download results
+# -----------------------------
+if not df.empty:
+    csv = df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download current page as CSV",
+        data=csv,
+        file_name="releases_page.csv",
+        mime="text/csv"
+    )
 
-    - name: Import Root CA to truststore
-      ansible.builtin.command: >
-        keytool -import -noprompt
-        -alias RootCA
-        -file "{{ root_ca_file }}"
-        -keystore "{{ truststore_output }}"
-        -storetype PKCS12
-        -storepass "{{ truststore_password }}"
-      args:
-        chdir: "{{ cert_dir }}"
 
-    - name: Import Intermediate CA to truststore
-      ansible.builtin.command: >
-        keytool -import -noprompt
-        -alias IntermediateCA
-        -file "{{ intermediate_ca_file }}"
-        -keystore "{{ truststore_output }}"
-        -storetype PKCS12
-        -storepass "{{ truststore_password }}"
-      args:
-        chdir: "{{ cert_dir }}"
 ```
