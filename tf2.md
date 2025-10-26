@@ -16,34 +16,26 @@
       set_fact:
         cluster_summary: []
 
-    - name: Loop through datacenters
+    - name: Flatten clusters with datacenter + vcenter info
       vars:
         vhost: "{{ vcenter_data.vcenter_hostname }}"
-      loop: "{{ vcenter_data.datacenters }}"
+      loop: "{{ vcenter_data.datacenters | subelements('clusters', skip_missing=True) }}"
       loop_control:
-        label: "{{ item.name }}"
-      block:
-        - name: Add all clusters (if any)
-          when: item.clusters is defined and item.clusters | length > 0
-          set_fact:
-            cluster_summary: "{{ cluster_summary + (
-              item.clusters | map('combine', {
-                'vcenter_hostname': vhost,
-                'datacenter_id': item.id,
-                'datacenter_name': item.name
-              }) | list
-            ) }}"
+        label: "{{ item.1.name | default('No Cluster') }}"
+      set_fact:
+        cluster_summary: "{{ cluster_summary + [ {
+          'vcenter_hostname': vhost,
+          'datacenter_id': item.0.id,
+          'datacenter_name': item.0.name,
+          'cluster_id': item.1.id | default('N/A'),
+          'cluster_name': item.1.name | default('N/A'),
+          'drs_enabled': item.1.drs_enabled | default(false),
+          'ha_enabled': item.1.ha_enabled | default(false)
+        } ] }}"
 
-        - name: Add placeholder when datacenter has no clusters
-          when: item.clusters is not defined or item.clusters | length == 0
-          set_fact:
-            cluster_summary: "{{ cluster_summary + [ {
-              'vcenter_hostname': vhost,
-              'datacenter_id': item.id,
-              'datacenter_name': item.name,
-              'cluster_id': 'N/A',
-              'cluster_name': 'N/A'
-            } ] }}"
+    - name: Show final flattened summary
+      debug:
+        var: cluster_summary
 
 ```
 
