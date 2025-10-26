@@ -1,3 +1,55 @@
+```yml
+---
+- name: Extract vCenter → Datacenter → Cluster summary
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    json_file: vcenter_master_data.json
+
+  tasks:
+    - name: Load JSON data
+      set_fact:
+        vcenter_data: "{{ lookup('file', json_file) | from_json }}"
+
+    - name: Initialize empty list
+      set_fact:
+        cluster_summary: []
+
+    - name: Build flattened list safely
+      vars:
+        vhost: "{{ vcenter_data.vcenter_hostname }}"
+      loop: "{{ vcenter_data.datacenters }}"
+      loop_control:
+        label: "{{ item.name }}"
+      block:
+        - name: Append clusters if present
+          when: item.clusters is defined and item.clusters | length > 0
+          set_fact:
+            cluster_summary: "{{ cluster_summary + (
+              item.clusters | map('combine', {
+                'vcenter_hostname': vhost,
+                'datacenter_id': item.id,
+                'datacenter_name': item.name
+              }) | list
+            ) }}"
+        - name: Append datacenter with no clusters (optional)
+          when: item.clusters is not defined or item.clusters | length == 0
+          set_fact:
+            cluster_summary: "{{ cluster_summary + [ {
+              'vcenter_hostname': vhost,
+              'datacenter_id': item.id,
+              'datacenter_name': item.name,
+              'cluster_id': 'N/A',
+              'cluster_name': 'N/A'
+            } ] }}"
+
+    - name: Display vCenter, datacenters, and clusters
+      debug:
+        var: cluster_summary
+
+```
+
 Refined Jenkins Pipeline for PR Validation and Tagged Releases
 This Jenkinsfile is designed for a Jenkins Multibranch Pipeline project, which automatically detects branches and Pull Requests.
 
