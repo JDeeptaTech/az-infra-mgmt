@@ -16,14 +16,14 @@
       set_fact:
         cluster_summary: []
 
-    - name: Build flattened list safely
+    - name: Loop through datacenters
       vars:
         vhost: "{{ vcenter_data.vcenter_hostname }}"
       loop: "{{ vcenter_data.datacenters }}"
       loop_control:
         label: "{{ item.name }}"
       block:
-        - name: Append clusters if present
+        - name: Add all clusters (if any)
           when: item.clusters is defined and item.clusters | length > 0
           set_fact:
             cluster_summary: "{{ cluster_summary + (
@@ -33,7 +33,8 @@
                 'datacenter_name': item.name
               }) | list
             ) }}"
-        - name: Append datacenter with no clusters (optional)
+
+        - name: Add placeholder when datacenter has no clusters
           when: item.clusters is not defined or item.clusters | length == 0
           set_fact:
             cluster_summary: "{{ cluster_summary + [ {
@@ -43,10 +44,6 @@
               'cluster_id': 'N/A',
               'cluster_name': 'N/A'
             } ] }}"
-
-    - name: Display vCenter, datacenters, and clusters
-      debug:
-        var: cluster_summary
 
 ```
 
