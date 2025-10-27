@@ -1,6 +1,5 @@
 ```yml
----
--import streamlit as st
+import streamlit as st
 import psycopg2
 import pandas as pd
 import plotly.express as px
@@ -18,16 +17,13 @@ DB_CONFIG = {
     "password": "password"
 }
 
-# -----------------------------
-# 🧩 Connection Helper
-# -----------------------------
 def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 # -----------------------------
-# 🔍 Query Data
+# 🧩 Query Functions
 # -----------------------------
-def load_vm_data(start_dt, end_dt):
+def load_lifecycle_summary(start_dt, end_dt):
     query = """
         SELECT lifecycle_status, COUNT(*) AS total
         FROM vm
@@ -37,116 +33,156 @@ def load_vm_data(start_dt, end_dt):
     """
     try:
         with get_connection() as conn:
-            df = pd.read_sql_query(query, conn, params=(start_dt, end_dt))
-        return df
+            return pd.read_sql_query(query, conn, params=(start_dt, end_dt))
     except Exception as e:
         st.error(f"Database query failed: {e}")
         return pd.DataFrame()
 
-# -----------------------------
-# 🎨 Streamlit Theme & Layout
-# -----------------------------
-st.set_page_config(
-    page_title="📊 VM Lifecycle Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# --- Custom CSS for white/red theme ---
-st.markdown(
+def load_vm_table(search, lifecycle, start_dt, end_dt):
+    query = """
+        SELECT invocation_id, correlation_id, vm_name, ip_address,
+               cpu, memory, lifecycle_status, created_at
+        FROM vm
+        WHERE created_at BETWEEN %s AND %s
     """
-    <style>
-    body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-    }
-    h1, h2, h3 {
-        color: #b30000 !important;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #fafafa !important;
-    }
-    .stButton>button {
-        background-color: #b30000 !important;
-        color: white !important;
-        border-radius: 8px;
-        border: none;
-    }
-    .stButton>button:hover {
-        background-color: #e60000 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+    params = [start_dt, end_dt]
+
+    if lifecycle != "All":
+        query += " AND lifecycle_status = %s"
+        params.append(lifecycle)
+
+    if search:
+        try:
+            uuid.UUID(search)
+            query += " AND (invocation_id = %s OR correlation_id = %s)"
+            params.extend([search, search])
+        except Exception:
+            query += " AND (vm_name ILIKE %s OR ip_address ILIKE %s)"
+            params.extend([f"%{search}%", f"%{search}%"])
+
+    query += " ORDER BY created_at DESC LIMIT 100"
+    try:
+        with get_connection() as conn:
+            return pd.read_sql_query(query, conn, params=tuple(params))
+    except Exception as e:
+        st.error(f"Data query failed: {e}")
+        return pd.DataFrame()
 
 # -----------------------------
-# 🧭 Sidebar Filters
+# 🎨 Streamlit Setup (White + Red Theme)
 # -----------------------------
-with st.sidebar:
-    st.title("🔍 Filters")
+st.set_page_config(page_title="VM Portal", layout="wide")
 
+st.markdown("""
+<style>
+body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+}
+h1, h2, h3, h4 {
+    color: #b30000 !important;
+}
+.stButton>button {
+    background-color: #b30000 !important;
+    color: white !important;
+    border-radius: 6px;
+}
+.stButton>button:hover {
+    background-color: #e60000 !important;
+}
+[data-testid="stSidebar"] {
+    background-color: #fafafa !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# 🧭 Sidebar Navigation
+# -----------------------------
+st.sidebar.title("📋 Menu")
+page = st.sidebar.radio("Navigate to", ["📊 Dashboard", "📦 VM Table"])
+
+# -----------------------------
+# 🧮 Common Top Filters
+# -----------------------------
+st.markdown("### 🔍 Filters")
+
+col1, col2, col3, col4, col5 = st.columns([2,2,2,2,2])
+with col1:
     start_date = st.date_input("Start date", datetime(2024, 1, 1))
+with col2:
     start_time = st.time_input("Start time", time(0, 0))
+with col3:
     end_date = st.date_input("End date", datetime.now().date())
+with col4:
     end_time = st.time_input("End time", time(23, 59))
-
-    start_dt = datetime.combine(start_date, start_time)
-    end_dt = datetime.combine(end_date, end_time)
-
-    if st.button("🔄 Refresh Data"):
+with col5:
+    if st.button("🔄 Refresh"):
         st.experimental_rerun()
 
+start_dt = datetime.combine(start_date, start_time)
+end_dt = datetime.combine(end_date, end_time)
+
+st.markdown("---")
+
 # -----------------------------
-# 📊 Dashboard Content
+# 📊 Page 1: Dashboard
 # -----------------------------
-st.title("📊 VM Lifecycle Summary")
+if page == "📊 Dashboard":
+    st.title("📊 VM Lifecycle Summary")
 
-# Load data
-df = load_vm_data(start_dt, end_dt)
+    df = load_lifecycle_summary(start_dt, end_dt)
 
-if df.empty:
-    st.warning("No data found for selected period.")
-else:
-    col1, col2 = st.columns(2)
+    if df.empty:
+        st.warning("No data found for the selected period.")
+    else:
+        col1, col2 = st.columns(2)
 
+        with col1:
+            st.subheader("🟢 Lifecycle Pie Chart")
+            fig_pie = px.pie(
+                df, names="lifecycle_status", values="total",
+                color_discrete_sequence=px.colors.sequential.Reds, hole=0.3
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col2:
+            st.subheader("📊 Lifecycle Counts (Bar)")
+            fig_bar = px.bar(
+                df, x="lifecycle_status", y="total", color="lifecycle_status",
+                color_discrete_sequence=px.colors.sequential.Reds_r, text="total"
+            )
+            fig_bar.update_layout(plot_bgcolor="white", paper_bgcolor="white")
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.markdown("### 📋 Summary Table")
+        st.dataframe(df.rename(columns={"lifecycle_status": "Lifecycle Status", "total": "Total VMs"}),
+                     hide_index=True, use_container_width=True)
+
+# -----------------------------
+# 📦 Page 2: VM Table
+# -----------------------------
+elif page == "📦 VM Table":
+    st.title("📦 VM Details")
+
+    # Add search & lifecycle filters on top
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
-        st.subheader("🟢 Lifecycle State Distribution (Pie)")
-        fig_pie = px.pie(
-            df,
-            names="lifecycle_status",
-            values="total",
-            color_discrete_sequence=px.colors.sequential.Reds,
-            hole=0.3,
-        )
-        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_pie, use_container_width=True)
-
+        search = st.text_input("🔍 Search by name, IP, or UUID")
     with col2:
-        st.subheader("📊 Lifecycle Counts (Bar)")
-        fig_bar = px.bar(
-            df,
-            x="lifecycle_status",
-            y="total",
-            color="lifecycle_status",
-            color_discrete_sequence=px.colors.sequential.Reds_r,
-            text="total",
-        )
-        fig_bar.update_layout(
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=dict(color="black"),
-            xaxis_title="Lifecycle Status",
-            yaxis_title="Total VMs",
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        lifecycle = st.selectbox("Lifecycle status", ["All", "Provisioned", "Running", "Terminated"])
+    with col3:
+        refresh = st.button("Reload Table")
 
-    # Summary table
-    st.markdown("### 📋 Summary Table")
-    df = df.rename(columns={"lifecycle_status": "Lifecycle Status", "total": "Total VMs"})
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    df = load_vm_table(search, lifecycle, start_dt, end_dt)
 
-
+    if df.empty:
+        st.warning("No matching records.")
+    else:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+        csv = df.to_csv(index=False)
+        st.download_button("📥 Download as CSV", data=csv, file_name="vm_list.csv", mime="text/csv")
 
 ```
 
