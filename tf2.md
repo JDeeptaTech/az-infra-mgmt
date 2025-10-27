@@ -1,41 +1,152 @@
 ```yml
 ---
-- name: Extract vCenter → Datacenter → Cluster summary
-  hosts: localhost
-  gather_facts: false
+-import streamlit as st
+import psycopg2
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, time
+import uuid
 
-  vars:
-    json_file: vcenter_master_data.json
+# -----------------------------
+# ⚙️ Database Configuration
+# -----------------------------
+DB_CONFIG = {
+    "host": "localhost",
+    "port": "5432",
+    "database": "mydb",
+    "user": "postgres",
+    "password": "password"
+}
 
-  tasks:
-    - name: Load JSON data
-      set_fact:
-        vcenter_data: "{{ lookup('file', json_file) | from_json }}"
+# -----------------------------
+# 🧩 Connection Helper
+# -----------------------------
+def get_connection():
+    return psycopg2.connect(**DB_CONFIG)
 
-    - name: Initialize empty list
-      set_fact:
-        cluster_summary: []
+# -----------------------------
+# 🔍 Query Data
+# -----------------------------
+def load_vm_data(start_dt, end_dt):
+    query = """
+        SELECT lifecycle_status, COUNT(*) AS total
+        FROM vm
+        WHERE created_at BETWEEN %s AND %s
+        GROUP BY lifecycle_status
+        ORDER BY total DESC
+    """
+    try:
+        with get_connection() as conn:
+            df = pd.read_sql_query(query, conn, params=(start_dt, end_dt))
+        return df
+    except Exception as e:
+        st.error(f"Database query failed: {e}")
+        return pd.DataFrame()
 
-    - name: Flatten clusters with datacenter + vcenter info
-      vars:
-        vhost: "{{ vcenter_data.vcenter_hostname }}"
-      loop: "{{ vcenter_data.datacenters | subelements('clusters', skip_missing=True) }}"
-      loop_control:
-        label: "{{ item.1.name | default('No Cluster') }}"
-      set_fact:
-        cluster_summary: "{{ cluster_summary + [ {
-          'vcenter_hostname': vhost,
-          'datacenter_id': item.0.id,
-          'datacenter_name': item.0.name,
-          'cluster_id': item.1.id | default('N/A'),
-          'cluster_name': item.1.name | default('N/A'),
-          'drs_enabled': item.1.drs_enabled | default(false),
-          'ha_enabled': item.1.ha_enabled | default(false)
-        } ] }}"
+# -----------------------------
+# 🎨 Streamlit Theme & Layout
+# -----------------------------
+st.set_page_config(
+    page_title="📊 VM Lifecycle Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-    - name: Show final flattened summary
-      debug:
-        var: cluster_summary
+# --- Custom CSS for white/red theme ---
+st.markdown(
+    """
+    <style>
+    body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+    h1, h2, h3 {
+        color: #b30000 !important;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #fafafa !important;
+    }
+    .stButton>button {
+        background-color: #b30000 !important;
+        color: white !important;
+        border-radius: 8px;
+        border: none;
+    }
+    .stButton>button:hover {
+        background-color: #e60000 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# -----------------------------
+# 🧭 Sidebar Filters
+# -----------------------------
+with st.sidebar:
+    st.title("🔍 Filters")
+
+    start_date = st.date_input("Start date", datetime(2024, 1, 1))
+    start_time = st.time_input("Start time", time(0, 0))
+    end_date = st.date_input("End date", datetime.now().date())
+    end_time = st.time_input("End time", time(23, 59))
+
+    start_dt = datetime.combine(start_date, start_time)
+    end_dt = datetime.combine(end_date, end_time)
+
+    if st.button("🔄 Refresh Data"):
+        st.experimental_rerun()
+
+# -----------------------------
+# 📊 Dashboard Content
+# -----------------------------
+st.title("📊 VM Lifecycle Summary")
+
+# Load data
+df = load_vm_data(start_dt, end_dt)
+
+if df.empty:
+    st.warning("No data found for selected period.")
+else:
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("🟢 Lifecycle State Distribution (Pie)")
+        fig_pie = px.pie(
+            df,
+            names="lifecycle_status",
+            values="total",
+            color_discrete_sequence=px.colors.sequential.Reds,
+            hole=0.3,
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with col2:
+        st.subheader("📊 Lifecycle Counts (Bar)")
+        fig_bar = px.bar(
+            df,
+            x="lifecycle_status",
+            y="total",
+            color="lifecycle_status",
+            color_discrete_sequence=px.colors.sequential.Reds_r,
+            text="total",
+        )
+        fig_bar.update_layout(
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
+            xaxis_title="Lifecycle Status",
+            yaxis_title="Total VMs",
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Summary table
+    st.markdown("### 📋 Summary Table")
+    df = df.rename(columns={"lifecycle_status": "Lifecycle Status", "total": "Total VMs"})
+    st.dataframe(df, hide_index=True, use_container_width=True)
+
+
 
 ```
 
