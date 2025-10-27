@@ -1,4 +1,26 @@
 ```yml
+- name: Extract only user-provided extra vars in AAP
+  set_fact:
+    job_payload: >-
+      {{
+        (ansible_job_extra_vars
+          | default({})
+          | dict2items
+          | rejectattr('key', 'match', '^(ansible_|awx_|tower_|omit|_.*)$')
+          | list
+          | items2dict)
+        if (ansible_job_extra_vars is defined)
+        else
+        (vars
+          | dict2items
+          | rejectattr('key', 'match', '^(ansible_|awx_|tower_|omit|_.*)$')
+          | rejectattr('key', 'in', ['inventory_dir', 'inventory_file', 'playbook_dir', 'role_path'])
+          | list
+          | items2dict)
+      }}
+
+
+
 import streamlit as st
 import psycopg2
 import pandas as pd
