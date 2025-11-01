@@ -1,3 +1,65 @@
+'''py
+# ---------------------------------------------------------
+# 🧩 1. SSL BYPASS (LOCAL DEV ONLY)
+# ---------------------------------------------------------
+import os, ssl
+from google.auth.transport import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.poolmanager import PoolManager
+import requests as reqs
+
+class UnsafeAdapter(HTTPAdapter):
+    """Disable SSL verification for local dev only"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+# Apply insecure HTTPS adapter
+session = reqs.Session()
+session.mount("https://", UnsafeAdapter())
+requests.AuthorizedSession = lambda credentials=None: session
+
+# Optional: disable warnings
+from requests.packages import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Environment hint
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+print("⚠️  SSL verification disabled for local development only")
+
+# ---------------------------------------------------------
+# 🧩 2. IMPORT YOUR APP LOGIC
+# ---------------------------------------------------------
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+import asyncio
+from app.core.scheduler import start_scheduler
+from app.db.cloud_db import get_engine, Base
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+# ---------------------------------------------------------
+# 🧩 3. FASTAPI LIFESPAN
+# ---------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    engine = await get_engine()
+    async with engine.connect() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.create_task(start_scheduler())
+    logger.info("🚀 FastAPI app started")
+    yield
+    logger.info("🛑 FastAPI app shutting down")
+
+app = FastAPI(title="Agentic AI Orchestrator", lifespan=lifespan)
+
+'''
+
 ```yml
 - name: Extract only user-provided extra vars in AAP
   set_fact:
