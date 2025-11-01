@@ -1,4 +1,76 @@
 ```py
+
+import os
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+# --------------------------------------------------------------------
+# 1️⃣ Load PostgreSQL connection parameters
+# --------------------------------------------------------------------
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASS = os.getenv("DB_PASS", "postgres")
+DB_NAME = os.getenv("DB_NAME", "postgres")
+
+# Construct standard async SQLAlchemy URL
+DATABASE_URL = (
+    f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+)
+
+# --------------------------------------------------------------------
+# 2️⃣ Initialize SQLAlchemy Async Engine
+# --------------------------------------------------------------------
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,            # set True for SQL debug logs
+    future=True,
+    pool_pre_ping=True,    # auto-reconnects on stale connections
+    pool_size=5,
+    max_overflow=10,
+)
+
+# Declarative base for ORM models
+Base = declarative_base()
+
+# --------------------------------------------------------------------
+# 3️⃣ Create session factory
+# --------------------------------------------------------------------
+async_session_factory = sessionmaker(
+    engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+# --------------------------------------------------------------------
+# 4️⃣ Async context session dependency for FastAPI
+# --------------------------------------------------------------------
+async def get_session() -> AsyncSession:
+    """Provide a transactional scope around a series of operations."""
+    async with async_session_factory() as session:
+        try:
+            yield session
+        except Exception as e:
+            logger.exception("Session rollback because of exception: %s", e)
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+# --------------------------------------------------------------------
+# 5️⃣ Database initialization helper (optional)
+# --------------------------------------------------------------------
+async def init_db():
+    """Create all tables defined in Base metadata."""
+    logger.info("Initializing database and creating tables if not exist...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ Database initialized successfully.")
+
+
 # ---------------------------------------------------------
 # 🧩 1. SSL BYPASS (LOCAL DEV ONLY)
 # ---------------------------------------------------------
