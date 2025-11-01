@@ -1,4 +1,4 @@
-'''py
+```py
 # ---------------------------------------------------------
 # 🧩 1. SSL BYPASS (LOCAL DEV ONLY)
 # ---------------------------------------------------------
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agentic AI Orchestrator", lifespan=lifespan)
 
-'''
+```
 
 ```yml
 - name: Extract only user-provided extra vars in AAP
