@@ -1,4 +1,11 @@
 ```py
+- name: Extract and enrich network IPs and CIDR
+  ansible.builtin.set_fact:
+    network_data_csv: "{{ network_data_csv | default([]) + [item | combine({'cidr': (item.name | regex_search('([0-9]{1,3}(?:\\.[0-9]{1,3}){3})$') | default('') | regex_replace('\\.\\d+$', '.0/24'))})] }}"
+  loop: "{{ vcenter_data_csv.network_data_csv | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
