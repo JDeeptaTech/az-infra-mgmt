@@ -1,0 +1,160 @@
+pipeline {
+    agent any
+
+    environment {
+        // If in repo:
+        TEST_LIST_PATH = 'tests-list.txt'
+
+        // If you prefer URL instead, comment the above and uncomment this:
+        // TEST_LIST_URL = 'https://example.com/tests-list.txt'
+    }
+
+    stages {
+        stage('Select tests (manual only)') {
+            steps {
+                script {
+                    //
+                    // 1. Load tests from file or URL
+                    //
+                    String rawText
+
+                    if (env.TEST_LIST_PATH) {
+                        // Ensure repo is checked out BEFORE this stage if using local file
+                        rawText = readFile(env.TEST_LIST_PATH)
+                    } else {
+                        rawText = new URL(env.TEST_LIST_URL).text
+                    }
+
+                    def tests = rawText
+                        .readLines()
+                        .collect { it.trim() }
+                        .findAll { it }    // drop empty lines
+
+                    echo "Available pytest tests (node ids):"
+                    tests.each { echo " - ${it}" }
+
+                    if (tests.isEmpty()) {
+                        error "No tests found in test list"
+                    }
+
+                    //
+                    // Helper to build safe checkbox names
+                    //
+                    def sanitize = { String s ->
+                        // Turn file::test name into safe param name
+                        return s.replaceAll(/[^A-Za-z0-9_]/, '_')
+                    }
+
+                    //
+                    // 2. Detect if build is manual
+                    //
+                    def causes = currentBuild.rawBuild.getCauses()
+                    boolean isManual = causes.any { c ->
+                        c instanceof hudson.model.Cause$UserIdCause
+                    }
+
+                    echo "Is manual build? ${isManual}"
+
+                    //
+                    // Map of checkboxParamName -> actual pytest nodeid
+                    //
+                    def keyToTest = [:]
+
+                    tests.each { t ->
+                        def key = "TEST_" + sanitize(t)
+                        keyToTest[key] = t
+                    }
+
+                    //
+                    // 3. If manual: show checkboxes for each test
+                    //
+                    Map selectedMap = [:]
+                    if (isManual) {
+                        def checkboxParams = keyToTest.collect { key, nodeid ->
+                            [
+                                $class: 'BooleanParameterDefinition',
+                                name: key,
+                                defaultValue: false,
+                                description: "Run: ${nodeid}"
+                            ]
+                        }
+
+                        selectedMap = input(
+                            id: 'testSelection',
+                            message: 'Select pytest tests to run',
+                            ok: 'Run selected tests',
+                            parameters: checkboxParams
+                        )
+                    } else {
+                        // Non-manual build: run full suite (so we don't need per-test selection)
+                        env.RUN_SELECTED_ONLY = 'false'
+                        echo "Non-manual build: will run full pytest suite."
+                        return
+                    }
+
+                    //
+                    // 4. Determine which tests were selected
+                    //
+                    def selectedTests = []
+                    keyToTest.each { key, nodeid ->
+                        if (selectedMap[key]) {
+                            selectedTests << nodeid
+                        }
+                    }
+
+                    if (selectedTests.isEmpty()) {
+                        echo "No tests selected. Will skip running tests."
+                        env.RUN_SELECTED_ONLY = 'true'
+                        env.PYTEST_SELECTED = ''
+                        currentBuild.description = "No tests selected"
+                    } else {
+                        echo "Selected tests:"
+                        selectedTests.each { echo " * ${it}" }
+
+                        // Join nodeids with spaces; pytest accepts multiple tests as args
+                        env.RUN_SELECTED_ONLY = 'true'
+                        env.PYTEST_SELECTED   = selectedTests.join(' ')
+                        currentBuild.description = "Selected tests: ${selectedTests.size()}"
+                    }
+                }
+            }
+        }
+
+        stage('Run pytest + Allure') {
+            steps {
+                script {
+                    String cmd
+
+                    if (env.RUN_SELECTED_ONLY == 'true') {
+                        if (env.PYTEST_SELECTED?.trim()) {
+                            // Run only selected tests
+                            cmd = "pytest ${env.PYTEST_SELECTED} --alluredir=allure-results"
+                        } else {
+                            // Manual build but no tests selected: skip
+                            echo "Skipping pytest: no tests were selected."
+                            return
+                        }
+                    } else {
+                        // Non-manual build: run full suite
+                        cmd = "pytest --alluredir=allure-results"
+                    }
+
+                    echo "Executing: ${cmd}"
+                    sh cmd
+                }
+            }
+        }
+
+        stage('Publish Allure report') {
+            when {
+                // Only publish if we actually ran pytest (results dir should exist)
+                expression { return fileExists('allure-results') }
+            }
+            steps {
+                allure includeProperties: false,
+                       jdk: '',
+                       results: [[path: 'allure-results']]
+            }
+        }
+    }
+}
