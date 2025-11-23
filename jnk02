@@ -1,0 +1,124 @@
+```groovy
+pipeline {
+    agent any
+    environment {
+        // Your existing variables...
+        GIT_CREDENTIAL_ID = 'your-git-creds' 
+        REPO_OWNER = 'your-org' 
+        REPO_NAME = 'your-repo'
+    }
+    
+    stages {
+        stage('Calculate Version & Promotion') {
+            steps {
+                script {
+                    // --- 1. DEFINE THE MAP (From your Image 1) ---
+                    def branchToEnvMap = [
+                        1 : [branch: 'poc-aap',    app_env: 'hic-poc'],
+                        2 : [branch: 'sap-aap',    app_env: 'hic-sap'],
+                        3 : [branch: 'dev-aap',    app_env: 'hic-dev'],
+                        4 : [branch: 'uat-aap',    app_env: 'uat'],
+                        5 : [branch: 'master-aap', app_env: 'prod']
+                    ]
+
+                    // --- 2. IDENTIFY CURRENT LEVEL ---
+                    def currentLevel = null
+                    def currentEntry = null
+                    
+                    branchToEnvMap.each { key, value ->
+                        if (value.branch == env.BRANCH_NAME) {
+                            currentLevel = key
+                            currentEntry = value
+                        }
+                    }
+                    
+                    if (!currentLevel) {
+                         error("Branch ${env.BRANCH_NAME} is not defined in the map.")
+                    }
+
+                    env.CURRENT_ENV = currentEntry.app_env
+                    
+                    // --- 3. VERSION CALCULATION LOGIC ---
+                    
+                    // CASE A: LOWEST LEVEL (The Source of Truth)
+                    // If we are on Level 1 (or whichever is your "Dev" start point), we CALCULATE the version.
+                    if (currentLevel == 1) { 
+                        
+                        echo "Lowest Level detected. Calculating new SemVer..."
+                        
+                        // --- (Paste your Logic from Image 2 & 3 here) ---
+                        def latestTag = sh(returnStdout: true, script: "git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0'").trim()
+                        
+                        // Strip 'v' and suffixes to get raw numbers
+                        def cleanVer = latestTag.startsWith('v') ? latestTag.substring(1) : latestTag
+                        cleanVer = cleanVer.split('-')[0] // Remove existing suffix
+                        def (major, minor, patch) = cleanVer.tokenize('.').collect { it as Integer }
+
+                        // Check Commit Messages for Bumps
+                        def commitMsg = sh(returnStdout: true, script: 'git log -1 --pretty=%B').trim()
+                        if (commitMsg.contains('[major]')) { major += 1; minor = 0; patch = 0 }
+                        else if (commitMsg.contains('[minor]')) { minor += 1; patch = 0 }
+                        else { patch += 1 }
+
+                        // Formulate New Tag
+                        env.NEW_VERSION = "v${major}.${minor}.${patch}-${env.CURRENT_ENV}"
+                    
+                    // CASE B: PROMOTION (Higher Levels)
+                    // We do NOT bump numbers. We find the version from the PREVIOUS level.
+                    } else {
+                        echo "Promotion Level detected. Inheriting version from previous environment..."
+                        
+                        def prevLevel = currentLevel - 1
+                        def prevEnvName = branchToEnvMap[prevLevel].app_env
+                        
+                        // Find the latest tag that existed in the PREVIOUS environment
+                        // We use --match to find tags like "*-hic-dev"
+                        try {
+                            def prevTag = sh(returnStdout: true, script: "git describe --tags --match '*${prevEnvName}' --abbrev=0").trim()
+                            echo "Found base tag from previous level: ${prevTag}"
+                            
+                            // Extract just the number (remove 'v' and remove suffix)
+                            // e.g. "v1.2.5-hic-dev" -> "1.2.5"
+                            def versionNum = prevTag.minus("v").minus("-${prevEnvName}")
+                            
+                            // Create the NEW tag for CURRENT environment
+                            if (env.CURRENT_ENV == 'prod') {
+                                // Prod usually has no suffix
+                                env.NEW_VERSION = "v${versionNum}"
+                            } else {
+                                env.NEW_VERSION = "v${versionNum}-${env.CURRENT_ENV}"
+                            }
+                            
+                        } catch (Exception e) {
+                            error("Could not find a tag from the previous level (${prevEnvName}) to promote. Ensure the lower environment was built first.")
+                        }
+                    }
+
+                    echo "Final Calculated Tag for this Branch: ${env.NEW_VERSION}"
+                }
+            }
+        }
+
+        stage('Tag Repository') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: GIT_CREDENTIAL_ID, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                        // Check if tag exists first to avoid errors
+                        def tagExists = sh(script: "git ls-remote --tags origin ${env.NEW_VERSION}", returnStdout: true).trim()
+                        
+                        if (!tagExists) {
+                            sh """
+                                git tag ${env.NEW_VERSION}
+                                git push https://${GIT_USER}:${GIT_PASS}@github.com/${REPO_OWNER}/${REPO_NAME}.git ${env.NEW_VERSION}
+                            """
+                            echo "Tagged repository with ${env.NEW_VERSION}"
+                        } else {
+                            echo "Tag ${env.NEW_VERSION} already exists. Skipping."
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
