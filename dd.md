@@ -1,3 +1,58 @@
+```groovy
+// --- REUSABLE HTTP REQUEST PLUGIN WRAPPERS ---
+
+def httpPost(url, credId, body) {
+    echo "Sending POST to ${url}"
+    def response = httpRequest(
+        authentication: credId,        // Automatically handles Auth Header
+        httpMode: 'POST',
+        url: url,
+        requestBody: body,
+        contentType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,         // Equivalent to curl -k
+        validResponseCodes: '100:399', // Don't fail build immediately on 4xx/5xx so we can handle it
+        consoleLogResponseBody: true   // Helpful for debugging
+    )
+    return checkResponse(response)
+}
+
+def httpPatch(url, credId, body) {
+    echo "Sending PATCH to ${url}"
+    def response = httpRequest(
+        authentication: credId,
+        httpMode: 'PATCH',
+        url: url,
+        requestBody: body,
+        contentType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,
+        validResponseCodes: '100:399',
+        consoleLogResponseBody: true
+    )
+    return checkResponse(response)
+}
+
+def httpGet(url, credId) {
+    echo "Sending GET to ${url}"
+    def response = httpRequest(
+        authentication: credId,
+        httpMode: 'GET',
+        url: url,
+        contentType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,
+        validResponseCodes: '100:399'
+    )
+    return checkResponse(response)
+}
+
+// Helper to validate success
+def checkResponse(response) {
+    if (response.status >= 400) {
+        error("API Request Failed with Status ${response.status}: ${response.content}")
+    }
+    return response.content
+}
+```
+
 ``` powershell
 # Define the path to your CSV files
 $SourceFolderPath = "C:\Your\Path\To\CSVFiles" # <--- IMPORTANT: Change this to the folder containing your CSV files
