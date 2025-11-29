@@ -1,80 +1,50 @@
-```py
-from graphviz import Digraph
+```txtgraph TD
+    Start([Start]) --> Inputs[Get Inputs:<br/>Req CPU, Req Memory, Capacity Params]
+    Inputs --> DecisionCap{Capacity Mgmt<br/>Enabled?}
 
-def create_logic_diagram():
-    dot = Digraph(comment='Cluster Selection Logic', format='png')
-    dot.attr(rankdir='TB', size='10')
+    %% Path 1: Capacity Management is ON (Smart Placement)
+    DecisionCap -- Yes --> CalcMem[Convert Req Memory<br/>GB to KB]
+    CalcMem --> LoopCPU1[Loop CPU Levels:<br/>8, 16, 18, 20]
+    LoopCPU1 --> CheckCPU1{Req CPU <= Level?}
+    CheckCPU1 -- No --> LoopCPU1
+    CheckCPU1 -- Yes --> SetTag1[Set Tag: <br/>Max-VM-Size:1-Level]
+    SetTag1 --> Filter1[Get Clusters by Tag]
+    Filter1 --> Found1{Clusters Found?}
+    Found1 -- No --> Error1[Throw Error:<br/>No Suitable Cluster]
+    
+    Found1 -- Yes --> LoopClusters[Loop Through Filtered Clusters]
+    LoopClusters --> GetMetrics[Get vROps Metrics:<br/>- Usable Memory<br/>- Current Used Memory]
+    GetMetrics --> CalcFit[Calc: Current Used + Req Memory]
+    CalcFit --> CheckFit{Fits in Usable?}
+    
+    CheckFit -- No --> LoopClusters
+    CheckFit -- Yes --> Compare{Is this Cluster<br/>Better than current best?}
+    
+    Compare -- No --> LoopClusters
+    Compare -- Yes --> SelectBest[Mark as Selected Host]
+    SelectBest --> LoopClusters
+    
+    LoopClusters -- End of Loop --> FinalCheck{Was a Host Selected?}
+    FinalCheck -- Yes --> ReturnBest([Return Selected Cluster ID])
+    FinalCheck -- No --> Error2[Throw Error:<br/>Not enough memory in any cluster]
 
-    # Styles
-    dot.attr('node', shape='rect', style='filled', fillcolor='lightblue')
-    
-    # Nodes
-    dot.node('Start', 'Start', shape='oval', fillcolor='lightgrey')
-    dot.node('Inputs', 'Get Inputs:\n(CPU, Mem, CapParams)')
-    dot.node('DecisionCap', 'Capacity Mgmt\nEnabled?', shape='diamond', fillcolor='yellow')
-    
-    # Path 1: Smart
-    dot.node('CalcMem', 'Convert Req Mem\nGB to KB')
-    dot.node('LoopCPU1', 'Loop CPU Levels:\n[8, 16, 18, 20]')
-    dot.node('CheckCPU1', 'Req CPU <= Level?', shape='diamond', fillcolor='orange')
-    dot.node('SetTag1', 'Set Tag:\nMax-VM-Size:1-{Level}')
-    dot.node('Filter1', 'Filter Clusters\nby Tag')
-    dot.node('Found1', 'Clusters Found?', shape='diamond', fillcolor='orange')
-    dot.node('LoopClusters', 'Loop: Candidate\nClusters')
-    dot.node('GetMetrics', 'Fetch Metrics:\n(Usable vs Used)')
-    dot.node('CheckFit', 'Fits in\nUsable?', shape='diamond', fillcolor='orange')
-    dot.node('SelectBest', 'Mark as\nBest Candidate', fillcolor='lightgreen')
-    dot.node('ReturnBest', 'Return\nSelected Cluster', shape='oval', fillcolor='lightgreen')
-    
-    # Path 2: Random
-    dot.node('LoopCPU2', 'Loop CPU Levels:\n[8, 16, 18, 20]')
-    dot.node('CheckCPU2', 'Req CPU <= Level?', shape='diamond', fillcolor='orange')
-    dot.node('SetTag2', 'Set Tag:\nMax-VM-Size:1-{Level}')
-    dot.node('Filter2', 'Filter Clusters\nby Tag')
-    dot.node('Found2', 'Clusters Found?', shape='diamond', fillcolor='orange')
-    dot.node('RandomPick', 'Pick Random\nCluster')
-    dot.node('ReturnRandom', 'Return\nRandom Cluster', shape='oval', fillcolor='lightgreen')
-    
-    # Errors
-    dot.node('Error', 'Throw Error', shape='oval', fillcolor='red')
+    %% Path 2: Capacity Management is OFF (Random Placement)
+    DecisionCap -- No --> LoopCPU2[Loop CPU Levels:<br/>8, 16, 18, 20]
+    LoopCPU2 --> CheckCPU2{Req CPU <= Level?}
+    CheckCPU2 -- No --> LoopCPU2
+    CheckCPU2 -- Yes --> SetTag2[Set Tag: <br/>Max-VM-Size:1-Level]
+    SetTag2 --> Filter2[Get Clusters by Tag]
+    Filter2 --> Found2{Clusters Found?}
+    Found2 -- No --> Error3[Throw Error:<br/>No Suitable Cluster]
+    Found2 -- Yes --> RandomPick[Pick Random Index]
+    RandomPick --> ReturnRandom([Return Random Cluster ID])
 
-    # Edges - Main Flow
-    dot.edge('Start', 'Inputs')
-    dot.edge('Inputs', 'DecisionCap')
-    
-    # Edges - Smart Path (Yes)
-    dot.edge('DecisionCap', 'CalcMem', label='Yes')
-    dot.edge('CalcMem', 'LoopCPU1')
-    dot.edge('LoopCPU1', 'CheckCPU1')
-    dot.edge('CheckCPU1', 'LoopCPU1', label='No (Next Lvl)')
-    dot.edge('CheckCPU1', 'SetTag1', label='Yes')
-    dot.edge('SetTag1', 'Filter1')
-    dot.edge('Filter1', 'Found1')
-    dot.edge('Found1', 'LoopClusters', label='Yes')
-    dot.edge('Found1', 'Error', label='No')
-    
-    dot.edge('LoopClusters', 'GetMetrics')
-    dot.edge('GetMetrics', 'CheckFit')
-    dot.edge('CheckFit', 'SelectBest', label='Yes')
-    dot.edge('CheckFit', 'LoopClusters', label='No')
-    dot.edge('SelectBest', 'LoopClusters', label='Next')
-    dot.edge('LoopClusters', 'ReturnBest', label='Done')
-
-    # Edges - Random Path (No)
-    dot.edge('DecisionCap', 'LoopCPU2', label='No')
-    dot.edge('LoopCPU2', 'CheckCPU2')
-    dot.edge('CheckCPU2', 'LoopCPU2', label='No')
-    dot.edge('CheckCPU2', 'SetTag2', label='Yes')
-    dot.edge('SetTag2', 'Filter2')
-    dot.edge('Filter2', 'Found2')
-    dot.edge('Found2', 'RandomPick', label='Yes')
-    dot.edge('Found2', 'Error', label='No')
-    dot.edge('RandomPick', 'ReturnRandom')
-
-    # Render
-    dot.render('cluster_logic_flow', view=True)
-    print("Diagram generated: cluster_logic_flow.png")
-
-if __name__ == '__main__':
-    create_logic_diagram()
+    %% Styling
+    style Start fill:#f9f,stroke:#333,stroke-width:2px
+    style ReturnBest fill:#9f9,stroke:#333,stroke-width:2px
+    style ReturnRandom fill:#9f9,stroke:#333,stroke-width:2px
+    style DecisionCap fill:#ff9,stroke:#333,stroke-width:2px
+    style Error1 fill:#f99,stroke:#333,stroke-width:2px
+    style Error2 fill:#f99,stroke:#333,stroke-width:2px
+    style Error3 fill:#f99,stroke:#333,stroke-width:2px
 ```
