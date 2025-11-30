@@ -1,50 +1,128 @@
-```txtgraph TD
-    Start([Start]) --> Inputs[Get Inputs:<br/>Req CPU, Req Memory, Capacity Params]
-    Inputs --> DecisionCap{Capacity Mgmt<br/>Enabled?}
+``` groovy
+// ============================================================================
+// REUSABLE HTTP HELPER LIBRARY
+// ============================================================================
 
-    %% Path 1: Capacity Management is ON (Smart Placement)
-    DecisionCap -- Yes --> CalcMem[Convert Req Memory<br/>GB to KB]
-    CalcMem --> LoopCPU1[Loop CPU Levels:<br/>8, 16, 18, 20]
-    LoopCPU1 --> CheckCPU1{Req CPU <= Level?}
-    CheckCPU1 -- No --> LoopCPU1
-    CheckCPU1 -- Yes --> SetTag1[Set Tag: <br/>Max-VM-Size:1-Level]
-    SetTag1 --> Filter1[Get Clusters by Tag]
-    Filter1 --> Found1{Clusters Found?}
-    Found1 -- No --> Error1[Throw Error:<br/>No Suitable Cluster]
-    
-    Found1 -- Yes --> LoopClusters[Loop Through Filtered Clusters]
-    LoopClusters --> GetMetrics[Get vROps Metrics:<br/>- Usable Memory<br/>- Current Used Memory]
-    GetMetrics --> CalcFit[Calc: Current Used + Req Memory]
-    CalcFit --> CheckFit{Fits in Usable?}
-    
-    CheckFit -- No --> LoopClusters
-    CheckFit -- Yes --> Compare{Is this Cluster<br/>Better than current best?}
-    
-    Compare -- No --> LoopClusters
-    Compare -- Yes --> SelectBest[Mark as Selected Host]
-    SelectBest --> LoopClusters
-    
-    LoopClusters -- End of Loop --> FinalCheck{Was a Host Selected?}
-    FinalCheck -- Yes --> ReturnBest([Return Selected Cluster ID])
-    FinalCheck -- No --> Error2[Throw Error:<br/>Not enough memory in any cluster]
+/**
+ * Sends a GET request
+ * @param url: The target URL
+ * @param credId: Jenkins Credential ID for authentication
+ * @return: The JSON content response as a Map/List (parsed)
+ */
+def httpGet(String url, String credId) {
+    echo " -> GET: ${url}"
+    def response = httpRequest(
+        authentication: credId,
+        httpMode: 'GET',
+        url: url,
+        contentType: 'APPLICATION_JSON',
+        acceptType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,
+        consoleLogResponseBody: true,
+        validResponseCodes: '100:399'
+    )
+    return parseResponse(response)
+}
 
-    %% Path 2: Capacity Management is OFF (Random Placement)
-    DecisionCap -- No --> LoopCPU2[Loop CPU Levels:<br/>8, 16, 18, 20]
-    LoopCPU2 --> CheckCPU2{Req CPU <= Level?}
-    CheckCPU2 -- No --> LoopCPU2
-    CheckCPU2 -- Yes --> SetTag2[Set Tag: <br/>Max-VM-Size:1-Level]
-    SetTag2 --> Filter2[Get Clusters by Tag]
-    Filter2 --> Found2{Clusters Found?}
-    Found2 -- No --> Error3[Throw Error:<br/>No Suitable Cluster]
-    Found2 -- Yes --> RandomPick[Pick Random Index]
-    RandomPick --> ReturnRandom([Return Random Cluster ID])
+/**
+ * Sends a POST request with a payload
+ */
+def httpPost(String url, String credId, String requestBody) {
+    echo " -> POST: ${url}"
+    def response = httpRequest(
+        authentication: credId,
+        httpMode: 'POST',
+        url: url,
+        requestBody: requestBody,
+        contentType: 'APPLICATION_JSON',
+        acceptType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,
+        consoleLogResponseBody: true,
+        validResponseCodes: '100:399'
+    )
+    return parseResponse(response)
+}
 
-    %% Styling
-    style Start fill:#f9f,stroke:#333,stroke-width:2px
-    style ReturnBest fill:#9f9,stroke:#333,stroke-width:2px
-    style ReturnRandom fill:#9f9,stroke:#333,stroke-width:2px
-    style DecisionCap fill:#ff9,stroke:#333,stroke-width:2px
-    style Error1 fill:#f99,stroke:#333,stroke-width:2px
-    style Error2 fill:#f99,stroke:#333,stroke-width:2px
-    style Error3 fill:#f99,stroke:#333,stroke-width:2px
+/**
+ * Sends a PATCH request (Useful for updating GitHub Releases)
+ */
+def httpPatch(String url, String credId, String requestBody) {
+    echo " -> PATCH: ${url}"
+    def response = httpRequest(
+        authentication: credId,
+        httpMode: 'PATCH',
+        url: url,
+        requestBody: requestBody,
+        contentType: 'APPLICATION_JSON',
+        acceptType: 'APPLICATION_JSON',
+        ignoreSslErrors: true,
+        consoleLogResponseBody: true,
+        validResponseCodes: '100:399'
+    )
+    return parseResponse(response)
+}
+
+/**
+ * Helper to parse JSON strings into Groovy objects safely
+ */
+@NonCPS
+def parseResponse(response) {
+    if (response.content) {
+        def jsonSlurper = new groovy.json.JsonSlurperClassic()
+        return jsonSlurper.parseText(response.content)
+    }
+    return [:] // Return empty map if no content
+}
+
+pipeline {
+    agent any
+    
+    // Define your global variables
+    environment {
+        GIT_CRED_ID = ''
+        REPO_API = " d"
+    }
+
+    stages {
+        stage('Release Management') {
+            steps {
+                script {
+                    // --- 1. GET EXAMPLE ---
+                    echo "Checking latest release..."
+                    try {
+                        def latestRelease = httpGet("${REPO_API}/releases/latest", GIT_CRED_ID)
+                        echo "Latest version is: ${latestRelease.tag_name}"
+                    } catch (Exception e) {
+                        echo "No latest release found (First run?)"
+                    }
+
+                    // --- 2. POST EXAMPLE (Create Tag/Release) ---
+                    echo "Creating new release..."
+                    
+                    def releasePayload = """{
+                        "tag_name": "${env.NEW_VERSION}",
+                        "target_commitish": "${sha}",
+                        "name": "${env.NEW_VERSION}",
+                        "body": "Automated release",
+                        "draft": false,
+                        "prerelease": true
+                    }"""
+                    
+                    // Call the library function
+                    def releaseResp = httpPost("${REPO_API}/releases", GIT_CRED_ID, releasePayload)
+                    
+                    // Access JSON properties directly!
+                    def releaseId = releaseResp.id
+                    echo "Created Release ID: ${releaseId}"
+
+                    // --- 3. PATCH EXAMPLE (Update Release) ---
+                    echo "Updating release to mark as stable..."
+                    def patchPayload = '{"prerelease": false}'
+                    
+                    httpPatch("${REPO_API}/releases/${releaseId}", GIT_CRED_ID, patchPayload)
+                }
+            }
+        }
+    }
+}
 ```
