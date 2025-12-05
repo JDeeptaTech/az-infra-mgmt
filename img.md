@@ -1,36 +1,40 @@
 ``` txt
 sequenceDiagram
-    participant User as Client (User)
+    participant U as User
     participant API as FastAPI App
-    participant Sched as APScheduler (Background Thread)
-    participant DB as PostgreSQL
+    participant Sched as APScheduler
+    participant DB as PostgreSQL (JobStore)
 
-    Note over API, DB: Async Connection (asyncpg)
-    Note over Sched, DB: Sync Connection (psycopg2)
+    Note over API, Sched: Shared Memory (In-App)
 
-    User->>API: POST /schedule-job (payload)
-    API->>Sched: add_job(func, trigger, args)
-    
+    %% Startup Phase
     rect rgb(240, 248, 255)
-    Note right of Sched: Job Serialization
-    Sched->>DB: INSERT into apscheduler_jobs (pickle blob)
-    DB-->>Sched: Confirm Save
-    end
-    
-    API-->>User: 200 OK {"job_id": "123"}
-
-    Note over Sched: ... Time Passes ...
-
-    loop Background Polling
-        Sched->>DB: SELECT * FROM apscheduler_jobs WHERE next_run_time <= NOW()
-        DB-->>Sched: Return Job Payload
-        Sched->>Sched: Deserialize & Execute Job
-        
-        opt Execution Logic
-            Sched->>DB: Update/Write Results (if needed)
+    Note right of API: Startup Event
+    API->>Sched: Initialize Scheduler
+    API->>DB: Connect to JobStore
+    API->>API: Check "Default Jobs" List
+    loop For each Default Job
+        API->>Sched: Job Exists?
+        alt Job Missing
+            Sched->>DB: INSERT Default Schedule
         end
-
-        Sched->>DB: DELETE or UPDATE next_run_time
     end
+    end
+
+    %% User Interaction Phase
+    U->>API: GET /jobs
+    API->>DB: Fetch active jobs
+    DB-->>API: Return Job List
+    API-->>U: JSON [ {id: "email_sender", next_run: "10:00"} ]
+
+    U->>API: POST /jobs/update (Change Schedule)
+    API->>Sched: reschedule_job(job_id, new_trigger)
+    Sched->>DB: UPDATE apscheduler_jobs SET next_run_time = ...
+    API-->>U: 200 OK
+
+    U->>API: POST /jobs/run-now (On Demand)
+    API->>Sched: add_job(func, trigger='date', run_date=NOW)
+    Note right of Sched: Fires immediately<br/>(Separate from recurring schedule)
+    Sched->>U: 202 Accepted
 
 ```
